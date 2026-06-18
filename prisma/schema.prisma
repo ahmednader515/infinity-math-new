@@ -1,0 +1,325 @@
+// Infinity Math — Prisma schema matching the shared legacy database
+
+generator client {
+  provider      = "prisma-client-js"
+  engineType    = "binary"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+model User {
+  id                String    @id @default(uuid())
+  fullName          String
+  phoneNumber       String    @unique
+  parentPhoneNumber String
+  hashedPassword    String?
+  image             String?
+  role              String    @default("USER")
+  balance           Float     @default(0)
+  grade             String?
+  division          String?
+  studyType         String?
+  governorate       String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  courses           Course[]
+  purchases         Purchase[]
+  userProgress      UserProgress[]
+  balanceTransactions BalanceTransaction[]
+  quizResults       QuizResult[]
+  quizAttempts      QuizAttempt[]
+  quizStudentSettings QuizStudentSettings[]
+}
+
+model Course {
+  id          String   @id @default(uuid())
+  userId      String
+  title       String   @db.Text
+  description String?  @db.Text
+  imageUrl    String?  @db.Text
+  price       Float?
+  isPublished Boolean  @default(false)
+  grade       String?
+  divisions   String[] @default([])
+  studyTypes  String[] @default([])
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  attachments Attachment[]
+  chapters    Chapter[]
+  purchases   Purchase[]
+  quizzes     Quiz[]
+  promoCodes  PromoCodeCourse[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([grade])
+}
+
+model Attachment {
+  id       String @id @default(uuid())
+  name     String
+  url      String @db.Text
+  courseId String
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([courseId])
+}
+
+model Chapter {
+  id                 String   @id @default(uuid())
+  title              String   @db.Text
+  description        String?  @db.Text
+  videoUrl           String?  @db.Text
+  videoType          String?  @default("UPLOAD")
+  youtubeVideoId     String?
+  documentUrl        String?  @db.Text
+  documentName       String?
+  position           Int
+  isPublished        Boolean  @default(false)
+  isFree             Boolean  @default(false)
+  studyTypes         String[] @default([])
+  requirePassingQuiz Boolean  @default(false)
+  requiredQuizId     String?
+  requiredQuiz       Quiz?    @relation("ChapterRequiredQuiz", fields: [requiredQuizId], references: [id], onDelete: SetNull)
+
+  courseId String
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  userProgress UserProgress[]
+  attachments  ChapterAttachment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([courseId])
+  @@index([requiredQuizId])
+}
+
+model ChapterAttachment {
+  id        String @id @default(uuid())
+  name      String
+  url       String @db.Text
+  position  Int    @default(0)
+  chapterId String
+  chapter   Chapter @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([chapterId])
+}
+
+model UserProgress {
+  id          String   @id @default(uuid())
+  userId      String
+  chapterId   String
+  isCompleted Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chapter Chapter @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, chapterId])
+  @@index([chapterId])
+}
+
+model Purchase {
+  id        String @id @default(uuid())
+  userId    String
+  courseId  String
+  status    String @default("ACTIVE")
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course    Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, courseId])
+  @@index([courseId])
+}
+
+model BalanceTransaction {
+  id          String @id @default(uuid())
+  userId      String
+  amount      Float
+  type        String
+  description String
+  user        User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model Quiz {
+  id           String   @id @default(uuid())
+  title        String
+  description  String?  @db.Text
+  position     Int
+  isPublished  Boolean  @default(false)
+  timer        Int?
+  maxAttempts  Int      @default(1)
+  courseId     String
+  parentQuizId String?
+  quizType     String?
+  course       Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  questions    Question[]
+  quizResults  QuizResult[]
+  attempts     QuizAttempt[]
+  studentSettings QuizStudentSettings[]
+  requiredByChapters Chapter[] @relation("ChapterRequiredQuiz")
+  courseAssignments QuizCourseAssignment[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([courseId])
+}
+
+model QuizCourseAssignment {
+  id        String @id @default(uuid())
+  quizId    String
+  courseId  String
+  position  Int
+  quiz      Quiz   @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Question {
+  id            String @id @default(uuid())
+  text          String @db.Text
+  type          String
+  options       String? @db.Text
+  correctAnswer String @db.Text
+  points        Int    @default(1)
+  imageUrl      String? @db.Text
+  position      Int    @default(1)
+  quizId        String
+  quiz          Quiz   @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  answers       QuizAnswer[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([quizId])
+}
+
+model QuizResult {
+  id            String @id @default(uuid())
+  studentId     String
+  quizId        String
+  score         Int
+  totalPoints   Int
+  percentage    Float
+  attemptNumber Int    @default(1)
+  submittedAt   DateTime @default(now())
+  user          User   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  quiz          Quiz   @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  answers       QuizAnswer[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([studentId, quizId])
+  @@index([quizId])
+}
+
+model QuizAttempt {
+  id          String    @id @default(uuid())
+  studentId   String
+  quizId      String
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  user        User      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  quiz        Quiz      @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, quizId])
+  @@index([studentId])
+  @@index([quizId])
+}
+
+model QuizAnswer {
+  id            String @id @default(uuid())
+  questionId    String
+  quizResultId  String
+  studentAnswer String @db.Text
+  correctAnswer String @db.Text
+  isCorrect     Boolean
+  pointsEarned  Int
+  question      Question   @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  quizResult    QuizResult @relation(fields: [quizResultId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([questionId])
+  @@index([quizResultId])
+}
+
+model QuizStudentSettings {
+  id          String @id @default(uuid())
+  studentId   String
+  quizId      String
+  maxAttempts Int
+  user        User @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  quiz        Quiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([studentId, quizId])
+  @@index([studentId])
+  @@index([quizId])
+}
+
+model PromoCode {
+  id            String @id @default(uuid())
+  code          String @unique
+  discountType  String
+  discountValue Float
+  minPurchase   Float?
+  maxDiscount   Float?
+  usageLimit    Int?
+  usedCount     Int    @default(0)
+  isActive      Boolean @default(true)
+  validFrom     DateTime?
+  validUntil    DateTime?
+  description   String? @db.Text
+  courses       PromoCodeCourse[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([code])
+  @@index([isActive])
+}
+
+model PromoCodeCourse {
+  id          String @id @default(uuid())
+  promocodeId String
+  courseId    String
+  promocode   PromoCode @relation(fields: [promocodeId], references: [id], onDelete: Cascade)
+  course      Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@unique([promocodeId, courseId])
+  @@index([promocodeId])
+  @@index([courseId])
+}
+
+// Legacy Category table from a prior migration — may exist but is unused by legacy app data
+model Category {
+  id          String   @id @default(cuid())
+  name        String
+  nameAr      String?  @map("name_ar")
+  slug        String   @unique
+  description String?
+  imageUrl    String?  @map("image_url")
+  order       Int      @default(0) @map("order")
+  createdById String?  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+}
