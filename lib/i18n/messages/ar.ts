@@ -197,6 +197,14 @@ export const arMessages: Messages = {
     lessonRatingAverageLine: "تقييم الحصة: {rating}/5 ({count} تقييم)",
     courseRatingAverageLine: "تقييم الكورس (كل الحصص): {rating}/5 ({count} تقييم)",
     contentLocked: "أكمل المحتوى السابق لفتح هذا العنصر",
+    lessonAccessDeniedTitle: "لا تملك صلاحية الوصول لهذه الحصة",
+    lessonAccessDeniedMessage:
+      "الكود الذي فعّلته يفتح حصصاً محددة فقط داخل هذه الدورة. لعرض هذه الحصة يمكنك شراء الدورة كاملة أو تفعيل كود آخر يشملها.",
+    quizAccessDeniedTitle: "لا تملك صلاحية الوصول لهذا الاختبار",
+    quizAccessDeniedMessage:
+      "الكود الذي فعّلته يفتح محتوى محدداً فقط داخل هذه الدورة. لعرض هذا الاختبار يمكنك شراء الدورة كاملة أو تفعيل كود آخر يشمله.",
+    purchaseCourseAction: "شراء الدورة",
+    activateAnotherCode: "تفعيل كود آخر",
     lessonCompleted: "تم إكمال الحصة",
     markLessonComplete: "تعليم الحصة كمكتملة",
     completingLesson: "جاري الحفظ...",

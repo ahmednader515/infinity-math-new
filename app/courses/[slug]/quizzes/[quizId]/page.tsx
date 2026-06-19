@@ -5,14 +5,18 @@ import { authOptions } from "@/lib/auth";
 import {
   getCourseWithContent,
   getEnrollment,
+  getAllowedQuizIdsForUserCourse,
+  getAllowedLessonIdsForUserCourse,
   hasFullCourseAccessAsStudent,
   quizBelongsToCourse,
 } from "@/lib/db";
 import { CourseOutlineSidebar } from "@/components/CourseOutlineSidebar";
+import { CourseContentAccessDenied } from "@/components/CourseContentAccessDenied";
 import { QuizPageClient } from "./QuizPageClient";
 import { resolveCourseProgression, shouldApplySequentialProgression, getNextNavFromProgression } from "@/lib/course-progression-server";
 import { findProgressionRowForQuiz } from "@/lib/course-progression";
 import { getServerTranslator } from "@/lib/i18n/server";
+import { pickLocalizedText } from "@/lib/i18n/localized-field";
 
 type Props = { params: Promise<{ slug: string; quizId: string }> };
 
@@ -44,6 +48,11 @@ function quizHref(course: { slug?: string | null; id: string }, targetQuizId: st
   return `/courses/${courseSeg(course)}/quizzes/${encodeURIComponent(targetQuizId)}`;
 }
 
+function courseHref(course: { slug?: string | null; id: string }): string {
+  const segment = course.slug && course.slug.trim() ? encodeURIComponent(course.slug.trim()) : course.id;
+  return `/courses/${segment}`;
+}
+
 type NavItem =
   | { type: "lesson"; id: string; slug?: string | null; locked: boolean }
   | { type: "quiz"; id: string; locked: boolean };
@@ -69,24 +78,70 @@ export default async function QuizPage({ params }: Props) {
 
   let canAccess = false;
   let hasFullStudentAccess = false;
+  let isEnrolled = false;
+  let allowedQuizIds: string[] = [];
+  let allowedLessonIds: string[] = [];
   if (isStaff) canAccess = true;
   if (session?.user?.id) {
     const en = await getEnrollment(session.user.id, course.id);
+    isEnrolled = !!en;
     if (en) {
       canAccess = true;
       hasFullStudentAccess = true;
     } else if (session.user.role === "STUDENT") {
       hasFullStudentAccess = await hasFullCourseAccessAsStudent(session.user.id, course.id);
       canAccess = hasFullStudentAccess;
+      if (!hasFullStudentAccess) {
+        [allowedLessonIds, allowedQuizIds] = await Promise.all([
+          getAllowedLessonIdsForUserCourse(session.user.id, course.id),
+          getAllowedQuizIdsForUserCourse(session.user.id, course.id),
+        ]);
+        if (allowedLessonIds.length > 0 || allowedQuizIds.length > 0) {
+          canAccess = true;
+        }
+      }
     }
   }
   if (!canAccess) notFound();
+
+  const courseAr =
+    course.titleAr != null
+      ? String(course.titleAr)
+      : course.title_ar != null
+        ? String(course.title_ar)
+        : null;
+  const courseEn = course.title != null ? String(course.title) : null;
+  const courseTitle = pickLocalizedText(null, courseAr, courseEn) || courseEn || courseAr || "";
 
   const belongs = await quizBelongsToCourse(quizId, course.id);
   if (!belongs) notFound();
 
   const quizRow = (data.quizzes ?? []).find((q) => String((q as { id?: string }).id) === quizId);
   if (!quizRow) notFound();
+
+  const quizDenied =
+    !isStaff &&
+    !isEnrolled &&
+    !hasFullStudentAccess &&
+    (allowedLessonIds.length > 0 || allowedQuizIds.length > 0) &&
+    !allowedQuizIds.includes(quizId);
+
+  if (quizDenied) {
+    return (
+      <CourseContentAccessDenied
+        title={t("courses.quizAccessDeniedTitle", "You do not have access to this quiz")}
+        message={t(
+          "courses.quizAccessDeniedMessage",
+          "The code you redeemed unlocks only specific content in this course. To take this quiz, purchase the full course or redeem another code that includes it.",
+        )}
+        courseHref={courseHref(course)}
+        courseTitle={courseTitle}
+        backLabel={t("courses.backToCourse", "Back to")}
+        purchaseCourseLabel={t("courses.purchaseCourseAction", "Purchase course")}
+        activateCodeLabel={t("courses.activateAnotherCode", "Redeem another code")}
+      />
+    );
+  }
 
   const progression = await resolveCourseProgression(
     session?.user?.id,

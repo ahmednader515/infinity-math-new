@@ -23,6 +23,8 @@ import { findProgressionRowForLesson } from "@/lib/course-progression";
 import { getServerTranslator } from "@/lib/i18n/server";
 import { pickLocalizedText } from "@/lib/i18n/localized-field";
 import { isCourseSegmentId } from "@/lib/legacy-schema";
+import { prepareLessonContentForDisplay } from "@/lib/lesson-content";
+import { CourseContentAccessDenied } from "@/components/CourseContentAccessDenied";
 
 type Props = { params: Promise<{ slug: string; lessonSlug: string }> };
 
@@ -105,6 +107,39 @@ export default async function LessonPage({ params }: Props) {
   const lessonObj = lesson as Record<string, unknown>;
   const lessonId = String(lessonObj.id ?? lesson.id);
 
+  const courseAr =
+    course.titleAr != null
+      ? String(course.titleAr)
+      : course.title_ar != null
+        ? String(course.title_ar)
+        : null;
+  const courseEn = course.title != null ? String(course.title) : null;
+  const courseTitle = pickLocalizedText(null, courseAr, courseEn) || courseEn || courseAr || "";
+
+  const lessonDenied =
+    !isStaff &&
+    !isEnrolled &&
+    !hasFullStudentAccess &&
+    allowedLessonIds.length > 0 &&
+    !allowedLessonIds.includes(lessonId);
+
+  if (lessonDenied) {
+    return (
+      <CourseContentAccessDenied
+        title={t("courses.lessonAccessDeniedTitle", "You do not have access to this lesson")}
+        message={t(
+          "courses.lessonAccessDeniedMessage",
+          "The code you redeemed unlocks only specific lessons in this course. To view this lesson, purchase the full course or redeem another code that includes it.",
+        )}
+        courseHref={courseHref(course)}
+        courseTitle={courseTitle}
+        backLabel={t("courses.backToCourse", "Back to")}
+        purchaseCourseLabel={t("courses.purchaseCourseAction", "Purchase course")}
+        activateCodeLabel={t("courses.activateAnotherCode", "Redeem another code")}
+      />
+    );
+  }
+
   const progression = await resolveCourseProgression(
     session?.user?.id,
     role,
@@ -121,21 +156,8 @@ export default async function LessonPage({ params }: Props) {
     notFound();
   }
 
-  // لو الوصول جزئي فقط (بدون تسجيل كامل أو اشتراك منصة): لا نسمح بفتح إلا الحصص المحددة
-  if (!isStaff && !isEnrolled && !hasFullStudentAccess && allowedLessonIds.length > 0) {
-    if (!allowedLessonIds.includes(lessonId)) notFound();
-  }
-
   const videoUrl = (lessonObj.videoUrl ?? lessonObj.video_url) as string;
   const youtubeVideoId = getYouTubeVideoId(videoUrl);
-  const courseAr =
-    course.titleAr != null
-      ? String(course.titleAr)
-      : course.title_ar != null
-        ? String(course.title_ar)
-        : null;
-  const courseEn = course.title != null ? String(course.title) : null;
-  const courseTitle = pickLocalizedText(null, courseAr, courseEn) || courseEn || courseAr || "";
   const lessonAr =
     lessonObj.titleAr != null
       ? String(lessonObj.titleAr)
@@ -176,6 +198,10 @@ export default async function LessonPage({ params }: Props) {
       ? progressionRow?.completed ?? (await isLessonCompleteForUser(session.user.id, lessonId, course.id))
       : false;
   const canMarkComplete = isStudent && hasFullStudentAccess && !lessonCompleted;
+
+  const lessonContent = lessonObj.content
+    ? prepareLessonContentForDisplay(String(lessonObj.content))
+    : null;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
@@ -226,11 +252,15 @@ export default async function LessonPage({ params }: Props) {
             </div>
           ) : null}
 
-          {lessonObj.content ? (
+          {lessonContent?.value ? (
             <div className="mt-6 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 prose-custom text-[var(--color-foreground)]">
-              {String(lessonObj.content).split("\n").map((p, i) => (
-                <p key={i}>{p}</p>
-              ))}
+              {lessonContent.mode === "html" ? (
+                <div dangerouslySetInnerHTML={{ __html: lessonContent.value }} />
+              ) : (
+                lessonContent.value.split("\n").map((paragraph, i) =>
+                  paragraph.trim() ? <p key={i}>{paragraph}</p> : null,
+                )
+              )}
             </div>
           ) : null}
 
