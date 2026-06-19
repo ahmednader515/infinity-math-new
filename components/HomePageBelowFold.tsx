@@ -1,16 +1,17 @@
 import Link from "next/link";
 import type { Session } from "next-auth";
 import {
-  getCategories,
-  getCoursesPublished,
-  getReviews,
-  listActiveSubscriptionPlansPublic,
-  listStoreProductsPublic,
-  listTeachersForHomepage,
-  selectTeachersForHomepagePreview,
   userHasActivePlatformSubscription,
   getLatestPlatformSubscriptionExpiry,
 } from "@/lib/db";
+import {
+  getCategoriesCached,
+  getCoursesPublishedCached,
+  getReviewsCached,
+  listActiveSubscriptionPlansPublicCached,
+  listStoreProductsPublicCached,
+  listTeachersForHomepageCached,
+} from "@/lib/public-data-cache";
 import type { HomepageSetting } from "@/lib/types";
 import { CourseCard } from "@/components/CourseCard";
 import { HomeTeachersSection } from "@/components/HomeTeachersSection";
@@ -37,8 +38,9 @@ import {
   HOMEPAGE_DEFAULT_STORE_SECTION_TITLE_AR,
 } from "@/lib/homepage-known-defaults";
 import { pickLocalizedText, settingTextOrDefault } from "@/lib/i18n/localized-field";
+import { selectTeachersForHomepagePreview } from "@/lib/db";
 
-type CourseWithCategory = Awaited<ReturnType<typeof getCoursesPublished>>[number];
+type CourseWithCategory = Awaited<ReturnType<typeof getCoursesPublishedCached>>[number];
 
 export async function HomePageBelowFold({
   homepageSettings,
@@ -49,57 +51,64 @@ export async function HomePageBelowFold({
 }) {
   const t = await getServerTranslator();
   let courses: CourseWithCategory[] = [];
-  let categories: Awaited<ReturnType<typeof getCategories>> = [];
-  let reviews: Awaited<ReturnType<typeof getReviews>> = [];
-  let teachersForHome: Awaited<ReturnType<typeof listTeachersForHomepage>> = [];
-  let subscriptionPlansHome: Awaited<ReturnType<typeof listActiveSubscriptionPlansPublic>> = [];
-  let storeProductsHome: Awaited<ReturnType<typeof listStoreProductsPublic>> = [];
+  let categories: Awaited<ReturnType<typeof getCategoriesCached>> = [];
+  let reviews: Awaited<ReturnType<typeof getReviewsCached>> = [];
+  let teachersForHome: Awaited<ReturnType<typeof listTeachersForHomepageCached>> = [];
+  let subscriptionPlansHome: Awaited<ReturnType<typeof listActiveSubscriptionPlansPublicCached>> = [];
+  let storeProductsHome: Awaited<ReturnType<typeof listStoreProductsPublicCached>> = [];
 
-  if (homepageSettings.teachersEnabled) {
-    try {
-      teachersForHome = await listTeachersForHomepage();
-    } catch {
-      /* جدول أو أعمدة غير جاهزة */
-    }
-  }
-  if (homepageSettings.subscriptionsEnabled) {
-    try {
-      subscriptionPlansHome = await listActiveSubscriptionPlansPublic();
-    } catch {
-      /* جداول الاشتراك غير جاهزة */
-    }
-  }
-  if (homepageSettings.storeEnabled) {
-    try {
-      storeProductsHome = await listStoreProductsPublic();
-    } catch {
-      /* جداول المتجر غير جاهزة */
-    }
-  }
-
-  let studentPlatformSubscription: { active: boolean; expiresAtIso: string | null } | null = null;
-  if (
+  const needsStudentSubscription =
     homepageSettings.subscriptionsEnabled &&
     session?.user?.role === "STUDENT" &&
-    session.user.id
-  ) {
-    try {
-      const active = await userHasActivePlatformSubscription(session.user.id);
-      const exp = active ? await getLatestPlatformSubscriptionExpiry(session.user.id) : null;
-      studentPlatformSubscription = {
-        active,
-        expiresAtIso: exp ? exp.toISOString() : null,
-      };
-    } catch {
-      studentPlatformSubscription = { active: false, expiresAtIso: null };
-    }
-  }
+    !!session.user.id;
 
-  try {
-    [courses, categories] = await Promise.all([getCoursesPublished(true), getCategories()]);
-  } catch {
-    // لا قاعدة بيانات أو غير متصلة
-  }
+  const [
+    teachersResult,
+    subscriptionPlansResult,
+    storeProductsResult,
+    catalogResult,
+    reviewsResult,
+    studentSubscriptionResult,
+  ] = await Promise.all([
+    homepageSettings.teachersEnabled
+      ? listTeachersForHomepageCached().catch(() => [] as Awaited<ReturnType<typeof listTeachersForHomepageCached>>)
+      : Promise.resolve([] as Awaited<ReturnType<typeof listTeachersForHomepageCached>>),
+    homepageSettings.subscriptionsEnabled
+      ? listActiveSubscriptionPlansPublicCached().catch(
+          () => [] as Awaited<ReturnType<typeof listActiveSubscriptionPlansPublicCached>>,
+        )
+      : Promise.resolve([] as Awaited<ReturnType<typeof listActiveSubscriptionPlansPublicCached>>),
+    homepageSettings.storeEnabled
+      ? listStoreProductsPublicCached().catch(
+          () => [] as Awaited<ReturnType<typeof listStoreProductsPublicCached>>,
+        )
+      : Promise.resolve([] as Awaited<ReturnType<typeof listStoreProductsPublicCached>>),
+    Promise.all([getCoursesPublishedCached(true), getCategoriesCached()]).catch(
+      () => [[], []] as [CourseWithCategory[], Awaited<ReturnType<typeof getCategoriesCached>>],
+    ),
+    getReviewsCached().catch(() => [] as Awaited<ReturnType<typeof getReviewsCached>>),
+    needsStudentSubscription && session?.user?.id
+      ? (async () => {
+          try {
+            const active = await userHasActivePlatformSubscription(session.user!.id!);
+            const exp = active ? await getLatestPlatformSubscriptionExpiry(session.user!.id!) : null;
+            return {
+              active,
+              expiresAtIso: exp ? exp.toISOString() : null,
+            };
+          } catch {
+            return { active: false, expiresAtIso: null };
+          }
+        })()
+      : Promise.resolve(null),
+  ]);
+
+  teachersForHome = teachersResult;
+  subscriptionPlansHome = subscriptionPlansResult;
+  storeProductsHome = storeProductsResult;
+  [courses, categories] = catalogResult;
+  reviews = reviewsResult;
+  const studentPlatformSubscription = studentSubscriptionResult;
 
   if (homepageSettings.teachersEnabled && teachersForHome.length > 0) {
     const teacherAccountIds = new Set(teachersForHome.map((t) => t.id));
@@ -110,12 +119,6 @@ export async function HomePageBelowFold({
         null;
       return !creator || !teacherAccountIds.has(creator);
     });
-  }
-
-  try {
-    reviews = await getReviews();
-  } catch {
-    /* جدول التعليقات غير موجود */
   }
 
   const platformNewsSlides = parsePlatformNewsItems(homepageSettings.platformNewsItems);

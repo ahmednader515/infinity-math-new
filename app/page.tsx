@@ -1,6 +1,5 @@
 import Image from "next/image";
 import { Suspense } from "react";
-import { unstable_noStore } from "next/cache";
 import { preload } from "react-dom";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -17,12 +16,10 @@ import { resolveHeroBgGradient } from "@/lib/hero-bg";
 import { getServerTranslator } from "@/lib/i18n/server";
 import { pickLocalizedText } from "@/lib/i18n/localized-field";
 
-/** عدم تخزين الصفحة مؤقتاً — الكورسات الجديدة والمحذوفة تظهر فوراً */
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+/** ISR: الكتالوج يُحدَّث تلقائياً؛ التغييرات من لوحة التحكم تُبطَل فوراً عبر revalidateTag */
+export const revalidate = 60;
 
 export default async function HomePage() {
-  unstable_noStore();
   const t = await getServerTranslator();
 
   const [session, homepageSettings] = await Promise.all([

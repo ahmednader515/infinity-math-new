@@ -8,7 +8,6 @@ import {
   getAccessibleCoursesForUser,
   countUsersByRole,
   countCourses,
-  getAllQuizAttemptsForAdmin,
   getTotalPlatformEarnings,
   getCoursesWithCountsForCreator,
   getSubscriptionsFeatureEnabled,
@@ -295,14 +294,11 @@ export default async function DashboardPage() {
     );
   }
 
-  const [studentsCount, coursesCount, _quizAttempts, totalEarnings] = await Promise.all([
+  const [studentsCount, coursesCount, totalEarnings] = await Promise.all([
     countUsersByRole("STUDENT"),
     countCourses(),
-    getAllQuizAttemptsForAdmin().catch(() => []),
     getTotalPlatformEarnings(),
   ]);
-
-  void _quizAttempts;
 
   return (
     <div className="space-y-8">

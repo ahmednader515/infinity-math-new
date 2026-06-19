@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getCourseById, getHomepageSettings, updateHomepageSettings } from "@/lib/db";
+import { revalidatePublicCache, PUBLIC_CACHE_TAGS } from "@/lib/public-data-cache";
 import { normalizeHeroHex } from "@/lib/hero-bg";
 import type { PlatformDetailsItem, PlatformDetailsPresetIcon, PlatformNewsItem } from "@/lib/types";
 import { PLATFORM_DETAILS_PRESET_ICON_OPTIONS } from "@/lib/platform-details";
@@ -685,6 +686,13 @@ export async function PUT(request: NextRequest) {
               : null)
           : undefined,
     });
+    revalidatePublicCache(
+      PUBLIC_CACHE_TAGS.homepage,
+      PUBLIC_CACHE_TAGS.courses,
+      PUBLIC_CACHE_TAGS.teachers,
+      PUBLIC_CACHE_TAGS.subscriptions,
+      PUBLIC_CACHE_TAGS.store,
+    );
     return NextResponse.json({ success: true });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);

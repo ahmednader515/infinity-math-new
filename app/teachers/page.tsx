@@ -1,10 +1,9 @@
 import { redirect } from "next/navigation";
-import { unstable_noStore } from "next/cache";
-import { getTeachersFeatureEnabled, listTeachersForHomepage } from "@/lib/db";
+import { getTeachersFeatureEnabled } from "@/lib/db";
+import { listTeachersForHomepageCached } from "@/lib/public-data-cache";
 import { TeachersBrowseClient } from "./TeachersBrowseClient";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+export const revalidate = 60;
 
 export const metadata = {
   title: "اختر المدرسين | منصتي التعليمية",
@@ -12,12 +11,11 @@ export const metadata = {
 };
 
 export default async function TeachersPage() {
-  unstable_noStore();
   const enabled = await getTeachersFeatureEnabled();
   if (!enabled) {
     redirect("/");
   }
-  const teachers = await listTeachersForHomepage().catch(() => []);
+  const teachers = await listTeachersForHomepageCached().catch(() => []);
 
   return <TeachersBrowseClient initialTeachers={teachers} />;
 }

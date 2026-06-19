@@ -15,6 +15,7 @@ import {
   type CourseContentOrderEntry,
   type CourseQuizInput,
 } from "@/lib/save-course-quizzes";
+import { revalidatePublicCache, PUBLIC_CACHE_TAGS } from "@/lib/public-data-cache";
 
 export async function GET() {
   try {
@@ -175,6 +176,8 @@ export async function POST(request: NextRequest) {
     contentOrder,
     replaceOwned: false,
   });
+
+  revalidatePublicCache(PUBLIC_CACHE_TAGS.courses);
 
   return NextResponse.json({ id: course.id, title: course.title, slug: course.slug });
 }

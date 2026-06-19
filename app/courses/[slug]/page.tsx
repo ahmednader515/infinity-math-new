@@ -1,10 +1,9 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { unstable_noStore } from "next/cache";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import {
-  getCourseWithContent,
+  getCourseWithContentCached,
   getEnrollment,
   getAllowedLessonIdsForUserCourse,
   getAllowedQuizIdsForUserCourse,
@@ -23,10 +22,6 @@ import { pickLocalizedText } from "@/lib/i18n/localized-field";
 import { isCourseSegmentId } from "@/lib/legacy-schema";
 
 type Props = { params: Promise<{ slug: string }> };
-
-/** عدم التخزين المؤقت — دائماً التحقق من وجود الدورة (تجنب 404 للدورات المحذوفة) */
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
 function isCourseId(segment: string): boolean {
   return isCourseSegmentId(segment);
@@ -49,9 +44,8 @@ function normalizeSlugForUrl(s: string | null | undefined): string {
 export async function generateMetadata({ params }: Props) {
   const t = await getServerTranslator();
   const { slug: segment } = await params;
-  unstable_noStore();
   const decoded = decodeSlug(segment);
-  const data = await getCourseWithContent(decoded);
+  const data = await getCourseWithContentCached(decoded);
   const course = data?.course;
   if (!course) return { title: t("courses.notFoundCourse", "Course not found") };
   const courseTitle = pickLocalizedText(
@@ -74,12 +68,11 @@ export async function generateMetadata({ params }: Props) {
 }
 
 export default async function CoursePage({ params }: Props) {
-  unstable_noStore();
   const t = await getServerTranslator();
   const { slug: segment } = await params;
   const decoded = decodeSlug(segment);
   const session = await getServerSession(authOptions);
-  let data: Awaited<ReturnType<typeof getCourseWithContent>> = null;
+  let data: Awaited<ReturnType<typeof getCourseWithContentCached>> = null;
   let isEnrolled = false;
   let allowedLessonIds: string[] = [];
   let allowedQuizIds: string[] = [];
@@ -88,7 +81,7 @@ export default async function CoursePage({ params }: Props) {
   let paidCourseCoveredBySubscription = false;
   let subscriptionExpiresAt: Date | null = null;
   try {
-    data = await getCourseWithContent(decoded);
+    data = await getCourseWithContentCached(decoded);
     if (data?.course && session?.user?.id && session.user.role === "STUDENT") {
       const [en, user, lessons, quizzes, fullAccess, subPaid] = await Promise.all([
         getEnrollment(session.user.id, data.course.id),

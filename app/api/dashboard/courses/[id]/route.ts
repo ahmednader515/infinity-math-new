@@ -18,6 +18,7 @@ import {
   type CourseContentOrderEntry,
   type CourseQuizInput,
 } from "@/lib/save-course-quizzes";
+import { revalidatePublicCache, PUBLIC_CACHE_TAGS } from "@/lib/public-data-cache";
 
 type LessonInput = { title: string; titleAr?: string; videoUrl?: string; content?: string; pdfUrl?: string; acceptsHomework?: boolean };
 type ContentOrderEntry = CourseContentOrderEntry;
@@ -171,6 +172,8 @@ export async function PUT(
     replaceOwned: true,
   });
 
+  revalidatePublicCache(PUBLIC_CACHE_TAGS.courses);
+
   return NextResponse.json({ success: true });
 }
 
@@ -270,6 +273,8 @@ export async function DELETE(
   }
 
   await deleteCourse(id);
+
+  revalidatePublicCache(PUBLIC_CACHE_TAGS.courses);
 
   return NextResponse.json({ success: true });
 }

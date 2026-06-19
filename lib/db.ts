@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { randomUUID } from "crypto";
 import { cache } from "react";
+import { unstable_cache } from "next/cache";
 import { neon } from "@neondatabase/serverless";
 import type {
   User,
@@ -251,13 +252,24 @@ export async function supportsConcurrentSessionTracking(): Promise<boolean> {
   return (await detectSchemaMode(sql)) !== "legacy";
 }
 
+const SESSION_ID_CACHE_TTL_MS = 30_000;
+const sessionIdCache = new Map<string, { value: string | null; expires: number }>();
+
+function invalidateSessionIdCache(userId: string) {
+  sessionIdCache.delete(userId);
+}
+
 /** جلسة واحدة نشطة لكل مستخدم — نستخدمها لمنع تسجيل الدخول من أكثر من جهاز */
 export async function getCurrentSessionId(userId: string): Promise<string | null> {
   if (!(await supportsConcurrentSessionTracking())) return null;
+  const now = Date.now();
+  const cached = sessionIdCache.get(userId);
+  if (cached && cached.expires > now) return cached.value;
   try {
     const rows = await sql`SELECT current_session_id FROM "User" WHERE id = ${userId} LIMIT 1`;
-    const val = (rows[0] as { current_session_id?: string | null })?.current_session_id;
-    return val ?? null;
+    const val = (rows[0] as { current_session_id?: string | null })?.current_session_id ?? null;
+    sessionIdCache.set(userId, { value: val, expires: now + SESSION_ID_CACHE_TTL_MS });
+    return val;
   } catch {
     return null;
   }
@@ -265,11 +277,13 @@ export async function getCurrentSessionId(userId: string): Promise<string | null
 
 export async function setCurrentSessionId(userId: string, sessionId: string): Promise<void> {
   if (!(await supportsConcurrentSessionTracking())) return;
+  invalidateSessionIdCache(userId);
   await sql`UPDATE "User" SET current_session_id = ${sessionId} WHERE id = ${userId}`;
 }
 
 export async function clearCurrentSessionId(userId: string): Promise<void> {
   if (!(await supportsConcurrentSessionTracking())) return;
+  invalidateSessionIdCache(userId);
   await sql`UPDATE "User" SET current_session_id = NULL WHERE id = ${userId}`;
 }
 
@@ -2077,8 +2091,14 @@ async function getHomepageSettingsUncached(): Promise<HomepageSetting> {
   }
 }
 
+const getHomepageSettingsCrossRequest = unstable_cache(
+  getHomepageSettingsUncached,
+  ["homepage-settings"],
+  { revalidate: 60, tags: ["homepage-settings"] },
+);
+
 /** نفس الطلب (layout + metadata + الصفحة) يقرأ الإعدادات مرة واحدة فقط */
-export const getHomepageSettings = cache(getHomepageSettingsUncached);
+export const getHomepageSettings = cache(async () => getHomepageSettingsCrossRequest());
 
 function pickReviewsSectionString(
   row: Record<string, unknown>,
@@ -3551,15 +3571,13 @@ export async function getPublishedCourseSlugsByIds(ids: string[]): Promise<Map<s
     }
     return map;
   }
-  const results = await Promise.all(
-    uniq.map((id) =>
-      sql`SELECT id, slug FROM "Course" WHERE id = ${id} AND is_published = true LIMIT 1`,
-    ),
-  );
-  for (const rows of results) {
-    const r = rows[0] as { id?: unknown; slug?: unknown } | undefined;
-    if (r?.id != null && r?.slug != null) {
-      map.set(String(r.id), String(r.slug));
+  const rows = await sql`
+    SELECT id, slug FROM "Course"
+    WHERE id = ANY(${uniq}::text[]) AND is_published = true
+  `;
+  for (const row of rows as Array<{ id?: unknown; slug?: unknown }>) {
+    if (row.id != null && row.slug != null) {
+      map.set(String(row.id), String(row.slug));
     }
   }
   return map;
@@ -4250,6 +4268,9 @@ export async function getCourseWithContent(segment: string): Promise<{
     quizzes,
   };
 }
+
+/** نفس الطلب (metadata + الصفحة) يقرأ محتوى الدورة مرة واحدة فقط */
+export const getCourseWithContentCached = cache(getCourseWithContent);
 
 /** جلب دورة كاملة مع حصص واختبارات (أسئلة + خيارات) — لصفحة التعديل */
 export async function getCourseForEdit(courseId: string): Promise<{

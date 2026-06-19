@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getReviews, createReview } from "@/lib/db";
+import { revalidatePublicCache, PUBLIC_CACHE_TAGS } from "@/lib/public-data-cache";
 
 /** قائمة تعليقات الطلاب — للأدمن فقط */
 export async function GET() {
@@ -55,6 +56,7 @@ export async function POST(request: NextRequest) {
       image_url: body.imageUrl?.trim() || null,
       order: body.order ?? 0,
     });
+    revalidatePublicCache(PUBLIC_CACHE_TAGS.reviews);
     return NextResponse.json(review);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);

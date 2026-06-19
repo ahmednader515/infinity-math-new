@@ -19,28 +19,6 @@ const nextConfig: NextConfig = {
       "next-auth/react": "next-auth/react",
     },
   },
-  async headers() {
-    return [
-      {
-        source: "/",
-        headers: [
-          { key: "Cache-Control", value: "private, no-store, max-age=0" },
-        ],
-      },
-      {
-        source: "/courses",
-        headers: [
-          { key: "Cache-Control", value: "private, no-store, max-age=0" },
-        ],
-      },
-      {
-        source: "/courses/:path*",
-        headers: [
-          { key: "Cache-Control", value: "private, no-store, max-age=0" },
-        ],
-      },
-    ];
-  },
 };
 
 export default nextConfig;
