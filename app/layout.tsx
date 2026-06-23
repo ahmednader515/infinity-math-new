@@ -39,7 +39,7 @@ export const viewport: Viewport = {
 
 export async function generateMetadata(): Promise<Metadata> {
   const defaultTitle = "منصتي التعليمية | دورات وتعلم أونلاين";
-  const defaultDescription = "منصة تعليمية حديثة لدورات البرمجة والتصميم والتطوير";
+  const defaultDescription = "منصة تعليمية حديثة لدورات الرياضيات — تعلم بأسلوب واضح ومنهجية متدرجة";
   try {
     const settings = await getHomepageSettings();
     const title = pickLocalizedText(null, settings.pageTitle, settings.pageTitleEn) || defaultTitle;

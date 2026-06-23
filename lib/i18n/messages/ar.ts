@@ -173,6 +173,7 @@ export const arMessages: Messages = {
     youAreEnrolled: "أنت مسجّل في هذه الدورة.",
     viaPlatformSubscription: "تشاهد هذه الدورة ضمن اشتراك المنصة حتى",
     partialAccessInfo: "هذا الكورس متاح لك عبر كود يفتح محتوى محدد (حصص/اختبارات) داخل الدورة.",
+    subscriptionCategoryAccessInfo: "هذا الكورس متاح لك ضمن اشتراكك في قسم «{category}».",
     courseContent: "محتوى الدورة",
     lessonsCount: "حصص",
     minutes: "دقيقة",
@@ -1133,7 +1134,7 @@ export const arMessages: Messages = {
     subscriptionsAdmin: {
       pageTitle: "إنشاء اشتراكات أسبوعية أو شهرية أو سنوية",
       pageIntro:
-        "الباقات تتيح للطالب شراء اشتراك لفترة محددة فيفتح له كل الكورسات المدفوعة المنشورة دون شراء كل كورس. عند انتهاء المدة يعود الوصول كالمعتاد حتى التجديد.",
+        "الباقات تتيح للطالب شراء اشتراك لفترة محددة فيفتح له كل الكورسات المدفوعة المنشورة في القسم المحدد دون شراء كل كورس. عند انتهاء المدة يعود الوصول كالمعتاد حتى التجديد.",
       visibilityTitle: "ظهور قسم الاشتراكات في الموقع",
       visibilityIntro:
         "عند التفعيل يظهر في الصفحة الرئيسية قسم «الاشتراكات المتاحة» بنفس أسلوب عنوان «اختر المدرسين». عند الإيقاف يختفي القسم ولا يمكن للطلاب شراء باقات جديدة من الصفحة الرئيسية.",
@@ -1146,6 +1147,9 @@ export const arMessages: Messages = {
       disabledHome: "تم إيقاف الميزة — اختفى القسم من الموقع",
       addPlanTitle: "إضافة باقة جديدة",
       labelName: "اسم الاشتراك",
+      labelCategory: "القسم",
+      selectCategoryPlaceholder: "— اختر القسم —",
+      categoryRequired: "يجب اختيار قسم للباقة",
       labelDuration: "المدة",
       durationWeek: "أسبوع",
       durationMonth: "شهر",
@@ -1161,6 +1165,7 @@ export const arMessages: Messages = {
       currentPlansTitle: "الباقات الحالية",
       colImage: "الصورة",
       colName: "الاسم",
+      colCategory: "القسم",
       colDuration: "المدة",
       colPrice: "السعر",
       colActive: "نشط",

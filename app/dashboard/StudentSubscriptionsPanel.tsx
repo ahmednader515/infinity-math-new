@@ -2,18 +2,16 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { SubscriptionPlanCard, type SubscriptionPlanCardData } from "@/components/SubscriptionPlanCard";
+import { SubscriptionPlanCard, type SubscriptionPlanCardData, type ActiveSubscriptionForPlan } from "@/components/SubscriptionPlanCard";
 import { useT } from "@/components/LocaleProvider";
 import { getDir } from "@/lib/i18n/core";
 
 export function StudentSubscriptionsPanel({
   plans,
-  hasActivePlatformSubscription,
-  activePlatformSubscriptionExpiresAtIso,
+  activeSubscriptions,
 }: {
   plans: SubscriptionPlanCardData[];
-  hasActivePlatformSubscription: boolean;
-  activePlatformSubscriptionExpiresAtIso: string | null;
+  activeSubscriptions: ActiveSubscriptionForPlan[];
 }) {
   const t = useT();
   const dir = getDir();
@@ -34,7 +32,7 @@ export function StudentSubscriptionsPanel({
           <p className="mt-1 text-sm text-[var(--color-muted)]">
             {t(
               "dashboard.page.subscriptionsPanel.subtitle",
-              "View available plans (week / month / year) and subscribe using your balance to unlock all published paid courses",
+              "View available plans by category (week / month / year) and subscribe using your balance to unlock paid courses in that category",
             )}
           </p>
         </div>
@@ -70,8 +68,7 @@ export function StudentSubscriptionsPanel({
                   plan={p}
                   isStudent
                   isLoggedIn
-                  hasActivePlatformSubscription={hasActivePlatformSubscription}
-                  activePlatformSubscriptionExpiresAtIso={activePlatformSubscriptionExpiresAtIso}
+                  activeSubscriptions={activeSubscriptions}
                 />
               ))}
             </div>

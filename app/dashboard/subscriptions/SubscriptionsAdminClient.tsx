@@ -14,14 +14,23 @@ export type AdminPlanRow = {
   durationKind: "week" | "month" | "year";
   price: number;
   isActive: boolean;
+  categoryId: string | null;
+  categoryName: string | null;
+};
+
+export type AdminCategoryOption = {
+  id: string;
+  name: string;
 };
 
 export function SubscriptionsAdminClient({
   initialEnabled,
   initialPlans,
+  categories,
 }: {
   initialEnabled: boolean;
   initialPlans: AdminPlanRow[];
+  categories: AdminCategoryOption[];
 }) {
   const router = useRouter();
   const t = useT();
@@ -45,6 +54,7 @@ export function SubscriptionsAdminClient({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [durationKind, setDurationKind] = useState<"week" | "month" | "year">("month");
+  const [categoryId, setCategoryId] = useState("");
   const [price, setPrice] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [imageUploading, setImageUploading] = useState(false);
@@ -55,6 +65,7 @@ export function SubscriptionsAdminClient({
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editDurationKind, setEditDurationKind] = useState<"week" | "month" | "year">("month");
+  const [editCategoryId, setEditCategoryId] = useState("");
   const [editPrice, setEditPrice] = useState("");
   const [editImageUrl, setEditImageUrl] = useState("");
   const [editActive, setEditActive] = useState(true);
@@ -98,6 +109,10 @@ export function SubscriptionsAdminClient({
       setError(t(`${Su}.invalidPrice`));
       return;
     }
+    if (!categoryId.trim()) {
+      setError(t(`${Su}.categoryRequired`));
+      return;
+    }
     setFormLoading(true);
     const res = await fetch("/api/dashboard/subscription-plans", {
       method: "POST",
@@ -109,6 +124,7 @@ export function SubscriptionsAdminClient({
         durationKind,
         price: p,
         imageUrl: imageUrl.trim() || null,
+        categoryId: categoryId.trim(),
       }),
     });
     const data = await res.json().catch(() => ({}));
@@ -121,6 +137,7 @@ export function SubscriptionsAdminClient({
     setName("");
     setDescription("");
     setDurationKind("month");
+    setCategoryId("");
     setPrice("");
     setImageUrl("");
     setImageError("");
@@ -135,6 +152,7 @@ export function SubscriptionsAdminClient({
     setEditName(row.name);
     setEditDescription(row.description ?? "");
     setEditDurationKind(row.durationKind);
+    setEditCategoryId(row.categoryId ?? "");
     setEditPrice(String(row.price ?? 0));
     setEditImageUrl(row.imageUrl ?? "");
     setEditActive(row.isActive);
@@ -158,6 +176,10 @@ export function SubscriptionsAdminClient({
       setError(t(`${Su}.invalidPrice`));
       return;
     }
+    if (!editCategoryId.trim()) {
+      setError(t(`${Su}.categoryRequired`));
+      return;
+    }
     setEditLoading(true);
     const res = await fetch(`/api/dashboard/subscription-plans/${encodeURIComponent(editingId)}`, {
       method: "PATCH",
@@ -170,6 +192,7 @@ export function SubscriptionsAdminClient({
         price: p,
         imageUrl: editImageUrl.trim() || null,
         isActive: editActive,
+        categoryId: editCategoryId.trim(),
       }),
     });
     const data = await res.json().catch(() => ({}));
@@ -296,6 +319,22 @@ export function SubscriptionsAdminClient({
             />
           </div>
           <div>
+            <label className="block text-sm font-medium text-[var(--color-foreground)]">{t(`${Su}.labelCategory`)}</label>
+            <select
+              required
+              value={categoryId}
+              onChange={(e) => setCategoryId(e.target.value)}
+              className="mt-1 w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2 text-[var(--color-foreground)]"
+            >
+              <option value="">{t(`${Su}.selectCategoryPlaceholder`)}</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
             <label className="block text-sm font-medium text-[var(--color-foreground)]">{t(`${Su}.labelDuration`)}</label>
             <select
               value={durationKind}
@@ -379,6 +418,7 @@ export function SubscriptionsAdminClient({
               <tr className="border-b border-[var(--color-border)] text-[var(--color-muted)]">
                 <th className={thClass}>{t(`${Su}.colImage`)}</th>
                 <th className={thClass}>{t(`${Su}.colName`)}</th>
+                <th className={thClass}>{t(`${Su}.colCategory`)}</th>
                 <th className={thClass}>{t(`${Su}.colDuration`)}</th>
                 <th className={thClass}>{t(`${Su}.colPrice`)}</th>
                 <th className={thClass}>{t(`${Su}.colActive`)}</th>
@@ -388,7 +428,7 @@ export function SubscriptionsAdminClient({
             <tbody>
               {plans.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-[var(--color-muted)]">
+                  <td colSpan={7} className="px-4 py-8 text-center text-[var(--color-muted)]">
                     {t(`${Su}.emptyPlans`)}
                   </td>
                 </tr>
@@ -404,6 +444,7 @@ export function SubscriptionsAdminClient({
                       )}
                     </td>
                     <td className="px-3 py-2 font-medium">{row.name}</td>
+                    <td className="px-3 py-2 text-[var(--color-muted)]">{row.categoryName ?? "—"}</td>
                     <td className="px-3 py-2 text-[var(--color-muted)]">{dkLabel(row.durationKind)}</td>
                     <td className="px-3 py-2 tabular-nums">{Number(row.price).toFixed(2)} {egp}</td>
                     <td className="px-3 py-2">
@@ -467,6 +508,22 @@ export function SubscriptionsAdminClient({
                   onChange={(e) => setEditName(e.target.value)}
                   className="mt-1 w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2 text-[var(--color-foreground)]"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-[var(--color-foreground)]">{t(`${Su}.labelCategory`)}</label>
+                <select
+                  required
+                  value={editCategoryId}
+                  onChange={(e) => setEditCategoryId(e.target.value)}
+                  className="mt-1 w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2 text-[var(--color-foreground)]"
+                >
+                  <option value="">{t(`${Su}.selectCategoryPlaceholder`)}</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-[var(--color-foreground)]">{t(`${Su}.labelDuration`)}</label>

@@ -2628,6 +2628,7 @@ async function ensurePlatformSubscriptionSchema(): Promise<void> {
         CONSTRAINT subscription_plan_duration_chk CHECK (duration_kind IN ('week', 'month', 'year'))
       )
     `;
+    await sql`ALTER TABLE "SubscriptionPlan" ADD COLUMN IF NOT EXISTS category_id TEXT`;
     await sql`
       CREATE TABLE IF NOT EXISTS "UserPlatformSubscription" (
         id TEXT PRIMARY KEY,
@@ -3085,9 +3086,42 @@ export type SubscriptionPlanPublic = {
   imageUrl: string | null;
   durationKind: SubscriptionDurationKind;
   price: number;
+  categoryId: string | null;
+  categoryName: string | null;
 };
 
 export type SubscriptionPlanAdmin = SubscriptionPlanPublic & { isActive: boolean };
+
+export type ActivePlatformSubscription = {
+  planId: string;
+  categoryId: string | null;
+  expiresAt: Date;
+};
+
+function mapSubscriptionPlanRow(r: Record<string, unknown>): SubscriptionPlanPublic {
+  const cat = r.category_id ?? r.cat_id;
+  const catName = r.cat_name_ar ?? r.cat_name;
+  return {
+    id: String(r.id),
+    name: String(r.name ?? ""),
+    description: String(r.description ?? ""),
+    imageUrl: r.image_url ? String(r.image_url) : null,
+    durationKind: String(r.duration_kind) as SubscriptionDurationKind,
+    price: Number(r.price ?? 0),
+    categoryId: cat != null && String(cat).trim() ? String(cat) : null,
+    categoryName: catName != null && String(catName).trim() ? String(catName) : null,
+  };
+}
+
+function courseCategoryIdFromRow(course: Record<string, unknown>): string | null {
+  const raw =
+    course.categoryId ??
+    course.category_id ??
+    (course.category as { id?: string } | undefined)?.id ??
+    null;
+  const id = raw != null ? String(raw).trim() : "";
+  return id || null;
+}
 
 function addSubscriptionDuration(from: Date, kind: SubscriptionDurationKind): Date {
   const d = new Date(from.getTime());
@@ -3100,20 +3134,16 @@ function addSubscriptionDuration(from: Date, kind: SubscriptionDurationKind): Da
 export async function listActiveSubscriptionPlansPublic(): Promise<SubscriptionPlanPublic[]> {
   try {
     await ensurePlatformSubscriptionSchema();
+    await ensureCategoryCreatedByColumn();
     const rows = await sql`
-      SELECT id, name, description, image_url, duration_kind, price
-      FROM "SubscriptionPlan"
-      WHERE is_active = true
-      ORDER BY created_at DESC
+      SELECT sp.id, sp.name, sp.description, sp.image_url, sp.duration_kind, sp.price,
+        sp.category_id, cat.name_ar AS cat_name_ar, cat.name AS cat_name
+      FROM "SubscriptionPlan" sp
+      LEFT JOIN "Category" cat ON cat.id = sp.category_id
+      WHERE sp.is_active = true
+      ORDER BY sp.created_at DESC
     `;
-    return (rows as Record<string, unknown>[]).map((r) => ({
-      id: String(r.id),
-      name: String(r.name ?? ""),
-      description: String(r.description ?? ""),
-      imageUrl: r.image_url ? String(r.image_url) : null,
-      durationKind: String(r.duration_kind) as SubscriptionDurationKind,
-      price: Number(r.price ?? 0),
-    }));
+    return (rows as Record<string, unknown>[]).map(mapSubscriptionPlanRow);
   } catch {
     return [];
   }
@@ -3121,20 +3151,18 @@ export async function listActiveSubscriptionPlansPublic(): Promise<SubscriptionP
 
 export async function listSubscriptionPlansAll(): Promise<SubscriptionPlanAdmin[]> {
   await ensurePlatformSubscriptionSchema();
-    const rows = await sql`
-      SELECT id, name, description, image_url, duration_kind, price, is_active
-      FROM "SubscriptionPlan"
-      ORDER BY created_at DESC
-    `;
-    return (rows as Record<string, unknown>[]).map((r) => ({
-      id: String(r.id),
-      name: String(r.name ?? ""),
-      description: String(r.description ?? ""),
-      imageUrl: r.image_url ? String(r.image_url) : null,
-      durationKind: String(r.duration_kind) as SubscriptionDurationKind,
-      price: Number(r.price ?? 0),
-      isActive: Boolean(r.is_active),
-    }));
+  await ensureCategoryCreatedByColumn();
+  const rows = await sql`
+    SELECT sp.id, sp.name, sp.description, sp.image_url, sp.duration_kind, sp.price, sp.is_active,
+      sp.category_id, cat.name_ar AS cat_name_ar, cat.name AS cat_name
+    FROM "SubscriptionPlan" sp
+    LEFT JOIN "Category" cat ON cat.id = sp.category_id
+    ORDER BY sp.created_at DESC
+  `;
+  return (rows as Record<string, unknown>[]).map((r) => ({
+    ...mapSubscriptionPlanRow(r),
+    isActive: Boolean(r.is_active),
+  }));
 }
 
 export async function createSubscriptionPlan(data: {
@@ -3144,13 +3172,18 @@ export async function createSubscriptionPlan(data: {
   duration_kind: SubscriptionDurationKind;
   price: number;
   is_active?: boolean;
+  category_id: string;
 }): Promise<{ id: string }> {
   await ensurePlatformSubscriptionSchema();
+  const categoryId = data.category_id?.trim();
+  if (!categoryId) throw new Error("يجب اختيار قسم للباقة");
+  const category = await getCategoryById(categoryId);
+  if (!category) throw new Error("القسم المحدد غير موجود");
   const id = generateId();
   const dk = data.duration_kind;
   if (dk !== "week" && dk !== "month" && dk !== "year") throw new Error("مدة غير صالحة");
   await sql`
-    INSERT INTO "SubscriptionPlan" (id, name, description, image_url, duration_kind, price, is_active, sort_order)
+    INSERT INTO "SubscriptionPlan" (id, name, description, image_url, duration_kind, price, is_active, sort_order, category_id)
     VALUES (
       ${id},
       ${data.name.trim()},
@@ -3159,7 +3192,8 @@ export async function createSubscriptionPlan(data: {
       ${dk},
       ${Math.max(0, data.price)},
       ${data.is_active !== false},
-      0
+      0,
+      ${categoryId}
     )
   `;
   return { id };
@@ -3174,6 +3208,7 @@ export async function updateSubscriptionPlan(
     duration_kind?: SubscriptionDurationKind;
     price?: number;
     is_active?: boolean;
+    category_id?: string;
   },
 ): Promise<void> {
   await ensurePlatformSubscriptionSchema();
@@ -3189,6 +3224,13 @@ export async function updateSubscriptionPlan(
   }
   if (data.price !== undefined) await sql`UPDATE "SubscriptionPlan" SET price = ${Math.max(0, data.price)}, updated_at = NOW() WHERE id = ${id}`;
   if (data.is_active !== undefined) await sql`UPDATE "SubscriptionPlan" SET is_active = ${data.is_active}, updated_at = NOW() WHERE id = ${id}`;
+  if (data.category_id !== undefined) {
+    const categoryId = data.category_id.trim();
+    if (!categoryId) throw new Error("يجب اختيار قسم للباقة");
+    const category = await getCategoryById(categoryId);
+    if (!category) throw new Error("القسم المحدد غير موجود");
+    await sql`UPDATE "SubscriptionPlan" SET category_id = ${categoryId}, updated_at = NOW() WHERE id = ${id}`;
+  }
 }
 
 export async function deleteSubscriptionPlan(id: string): Promise<void> {
@@ -3204,11 +3246,13 @@ export async function getSubscriptionPlanById(id: string): Promise<{
   duration_kind: SubscriptionDurationKind;
   price: number;
   is_active: boolean;
+  category_id: string | null;
 } | null> {
   await ensurePlatformSubscriptionSchema();
   const rows = await sql`SELECT * FROM "SubscriptionPlan" WHERE id = ${id} LIMIT 1`;
   const r = rows[0] as Record<string, unknown> | undefined;
   if (!r) return null;
+  const categoryId = r.category_id != null && String(r.category_id).trim() ? String(r.category_id) : null;
   return {
     id: String(r.id),
     name: String(r.name ?? ""),
@@ -3217,7 +3261,53 @@ export async function getSubscriptionPlanById(id: string): Promise<{
     duration_kind: String(r.duration_kind) as SubscriptionDurationKind,
     price: Number(r.price ?? 0),
     is_active: Boolean(r.is_active),
+    category_id: categoryId,
   };
+}
+
+export async function listActivePlatformSubscriptionsForUser(
+  userId: string,
+): Promise<ActivePlatformSubscription[]> {
+  try {
+    await ensurePlatformSubscriptionSchema();
+    const rows = await sql`
+      SELECT ups.plan_id, ups.expires_at, sp.category_id
+      FROM "UserPlatformSubscription" ups
+      LEFT JOIN "SubscriptionPlan" sp ON sp.id = ups.plan_id
+      WHERE ups.user_id = ${userId} AND ups.expires_at > NOW()
+      ORDER BY ups.expires_at DESC
+    `;
+    return (rows as Record<string, unknown>[]).map((r) => {
+      const expRaw = r.expires_at;
+      const expiresAt = expRaw instanceof Date ? expRaw : new Date(String(expRaw));
+      const categoryId =
+        r.category_id != null && String(r.category_id).trim() ? String(r.category_id) : null;
+      return {
+        planId: String(r.plan_id ?? ""),
+        categoryId,
+        expiresAt,
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+function subscriptionCategoryMatches(
+  planCategoryId: string | null,
+  targetCategoryId: string | null,
+): boolean {
+  if (planCategoryId == null) return true;
+  return !!targetCategoryId && planCategoryId === targetCategoryId;
+}
+
+export async function userHasActiveSubscriptionForCategory(
+  userId: string,
+  categoryId: string | null,
+): Promise<{ active: boolean; expiresAt: Date | null }> {
+  const subs = await listActivePlatformSubscriptionsForUser(userId);
+  const match = subs.find((s) => subscriptionCategoryMatches(s.categoryId, categoryId));
+  return match ? { active: true, expiresAt: match.expiresAt } : { active: false, expiresAt: null };
 }
 
 /** هل للمستخدم اشتراك منصة نشط (أي وقت انتهاء في المستقبل) */
@@ -3235,16 +3325,19 @@ export async function userHasActivePlatformSubscription(userId: string): Promise
   }
 }
 
-/** اشتراك نشط + دورة منشورة + سعرها > 0 ⇒ وصول كامل كمسجّل */
+/** اشتراك نشط + دورة منشورة + سعرها > 0 + قسم الدورة يطابق قسم الباقة */
 export async function userHasActivePlatformSubscriptionForPaidCourse(userId: string, courseId: string): Promise<boolean> {
-  const active = await userHasActivePlatformSubscription(userId);
-  if (!active) return false;
+  const subs = await listActivePlatformSubscriptionsForUser(userId);
+  if (subs.length === 0) return false;
   const course = await getCourseById(courseId);
   if (!course) return false;
-  const pub = (course as { isPublished?: boolean }).isPublished ?? (course as { is_published?: boolean }).is_published;
+  const courseRow = course as unknown as Record<string, unknown>;
+  const pub = courseRow.isPublished ?? courseRow.is_published;
   if (!pub) return false;
-  const price = Number((course as { price?: unknown }).price) || 0;
-  return price > 0;
+  const price = Number(courseRow.price) || 0;
+  if (price <= 0) return false;
+  const courseCategoryId = courseCategoryIdFromRow(courseRow);
+  return subs.some((sub) => subscriptionCategoryMatches(sub.categoryId, courseCategoryId));
 }
 
 /** تسجيل في الدورة أو اشتراك منصة نشط على دورة مدفوعة منشورة */
@@ -3273,18 +3366,20 @@ export async function purchasePlatformSubscription(userId: string, planId: strin
   await ensurePlatformSubscriptionSchema();
   const plan = await getSubscriptionPlanById(planId);
   if (!plan || !plan.is_active) throw new Error("الباقة غير متاحة");
+  if (!plan.category_id) throw new Error("الباقة غير مكتملة الإعداد — حدّد القسم من لوحة التحكم");
   const price = plan.price;
   const user = await getUserById(userId);
   if (!user) throw new Error("المستخدم غير موجود");
   if (user.role !== "STUDENT") throw new Error("الاشتراك متاح للطلاب فقط");
 
-  if (await userHasActivePlatformSubscription(userId)) {
-    const exp = await getLatestPlatformSubscriptionExpiry(userId);
+  const existingSub = await userHasActiveSubscriptionForCategory(userId, plan.category_id);
+  if (existingSub.active) {
+    const exp = existingSub.expiresAt;
     const expLine = exp
-      ? `ينتهي اشتراكك الحالي في ${new Intl.DateTimeFormat("ar-EG", { dateStyle: "medium", timeStyle: "short" }).format(exp)}. `
+      ? `لديك اشتراك نشط لهذا القسم حتى ${new Intl.DateTimeFormat("ar-EG", { dateStyle: "medium", timeStyle: "short" }).format(exp)}. `
       : "";
     throw new Error(
-      `${expLine}أنت مشترك في المنصة بالفعل ولا تحتاج لدفع مرة أخرى إلا بعد انتهاء هذه المدة.`,
+      `${expLine}لا تحتاج لشراء هذه الباقة مرة أخرى إلا بعد انتهاء الاشتراك الحالي لنفس القسم.`,
     );
   }
 
@@ -3331,12 +3426,16 @@ export async function listUserPlatformSubscriptionsForAdmin(): Promise<PlatformS
         u.email AS user_email,
         ups.plan_id,
         sp.name AS plan_name,
+        sp.category_id AS plan_category_id,
+        cat.name_ar AS plan_category_name_ar,
+        cat.name AS plan_category_name,
         ups.price_paid,
         ups.expires_at,
         ups.created_at
       FROM "UserPlatformSubscription" ups
       JOIN "User" u ON u.id = ups.user_id
       LEFT JOIN "SubscriptionPlan" sp ON sp.id = ups.plan_id
+      LEFT JOIN "Category" cat ON cat.id = sp.category_id
       ORDER BY ups.expires_at DESC, ups.created_at DESC
     `;
     const now = Date.now();

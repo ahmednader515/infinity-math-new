@@ -11,7 +11,26 @@ export type SubscriptionPlanCardData = {
   imageUrl: string | null;
   durationKind: string;
   price: number;
+  categoryId: string | null;
+  categoryName: string | null;
 };
+
+export type ActiveSubscriptionForPlan = {
+  categoryId: string | null;
+  expiresAtIso: string;
+};
+
+function findActiveSubscriptionForPlan(
+  plan: SubscriptionPlanCardData,
+  activeSubscriptions: ActiveSubscriptionForPlan[],
+): ActiveSubscriptionForPlan | null {
+  return (
+    activeSubscriptions.find((sub) => {
+      if (plan.categoryId) return sub.categoryId === plan.categoryId;
+      return sub.categoryId == null;
+    }) ?? null
+  );
+}
 
 const TEAL = "#14b8a6";
 const SURFACE = "#0b111e";
@@ -46,15 +65,16 @@ export function SubscriptionPlanCard({
   plan,
   isStudent,
   isLoggedIn,
-  hasActivePlatformSubscription = false,
-  activePlatformSubscriptionExpiresAtIso = null,
+  activeSubscriptions = [],
 }: {
   plan: SubscriptionPlanCardData;
   isStudent: boolean;
   isLoggedIn: boolean;
-  /** للطالب: هل لديه اشتراك منصة نشط (أي باقة) */
+  /** اشتراكات نشطة للطالب (قد يكون أكثر من قسم) */
+  activeSubscriptions?: ActiveSubscriptionForPlan[];
+  /** @deprecated استخدم activeSubscriptions */
   hasActivePlatformSubscription?: boolean;
-  /** تاريخ انتهاء الاشتراك النشط (ISO) */
+  /** @deprecated استخدم activeSubscriptions */
   activePlatformSubscriptionExpiresAtIso?: string | null;
 }) {
   const router = useRouter();
@@ -62,8 +82,11 @@ export function SubscriptionPlanCard({
   const [err, setErr] = useState("");
   const [infoMessage, setInfoMessage] = useState("");
   const [showAddBalanceLink, setShowAddBalanceLink] = useState(false);
-  /** تاريخ انتهاء الاشتراك بعد نجاح الشراء (ISO) */
   const [successExpiresAt, setSuccessExpiresAt] = useState<string | null>(null);
+
+  const activeForPlan = findActiveSubscriptionForPlan(plan, activeSubscriptions);
+  const hasActivePlatformSubscription = !!activeForPlan;
+  const activePlatformSubscriptionExpiresAtIso = activeForPlan?.expiresAtIso ?? null;
 
   const activeSubExpiryFormatted =
     hasActivePlatformSubscription && activePlatformSubscriptionExpiresAtIso
@@ -77,10 +100,10 @@ export function SubscriptionPlanCard({
     setSuccessExpiresAt(null);
     if (isStudent && hasActivePlatformSubscription) {
       const line = activeSubExpiryFormatted
-        ? `اشتراكك في المنصة نشط حتى ${activeSubExpiryFormatted}. `
-        : "لديك اشتراك منصة نشط. ";
+        ? `اشتراكك في قسم «${plan.categoryName ?? "هذه الباقة"}» نشط حتى ${activeSubExpiryFormatted}. `
+        : `لديك اشتراك نشط لقسم «${plan.categoryName ?? "هذه الباقة"}». `;
       setInfoMessage(
-        `${line}لا تحتاج لدفع مرة أخرى؛ يمكنك تجديد أو شراء باقة جديدة بعد انتهاء هذه المدة فقط.`,
+        `${line}لا تحتاج لدفع هذه الباقة مرة أخرى قبل انتهاء المدة.`,
       );
       return;
     }
@@ -173,6 +196,9 @@ export function SubscriptionPlanCard({
         <div className="flex flex-row items-start justify-between gap-3">
           <div className="flex min-w-0 flex-1 flex-col gap-2">
             <h3 className="text-right text-xl font-bold leading-snug text-white">{plan.name}</h3>
+            {plan.categoryName ? (
+              <p className="text-right text-xs font-medium text-teal-300/90">قسم: {plan.categoryName}</p>
+            ) : null}
             {isStudent && hasActivePlatformSubscription ? (
               <p className="text-right text-xs leading-relaxed text-emerald-300/95">
                 {activeSubExpiryFormatted ? (
@@ -247,19 +273,23 @@ export function SubscriptionPlanCard({
         {plan.description?.trim() ? (
           <p className="text-right text-sm leading-relaxed text-neutral-400">{plan.description.trim()}</p>
         ) : (
-          <p className="text-right text-sm text-neutral-500">وصول لجميع الكورسات المدفوعة المنشورة طوال مدة الاشتراك.</p>
+          <p className="text-right text-sm text-neutral-500">
+            {plan.categoryName
+              ? `وصول لكل الكورسات المدفوعة المنشورة في قسم «${plan.categoryName}» طوال مدة الاشتراك.`
+              : "وصول لكل الكورسات المدفوعة المنشورة طوال مدة الاشتراك."}
+          </p>
         )}
 
         <div className="mt-6 flex flex-row items-end justify-between gap-3 border-t border-white/10 pt-4">
           <div className="space-y-1 text-right text-xs text-neutral-400">
             <p className="flex items-center justify-end gap-1.5">
-              <span>وصول شامل للمدفوع</span>
+              <span>{plan.categoryName ? `كورسات قسم ${plan.categoryName}` : "وصول شامل للمدفوع"}</span>
               <span className="text-neutral-500" aria-hidden>
                 ◷
               </span>
             </p>
             <p className="flex items-center justify-end gap-1.5">
-              <span>جميع الأقسام</span>
+              <span>{plan.categoryName ?? "قسم محدد"}</span>
               <span className="text-neutral-500" aria-hidden>
                 ▤
               </span>
@@ -293,7 +323,8 @@ export function SubscriptionPlanCard({
               </span>
             </p>
             <p className="text-xs leading-relaxed text-emerald-200/85">
-              يمكنك الآن فتح جميع الكورسات المدفوعة المنشورة في المنصة دون شراء كل كورس على حدة حتى هذا التاريخ.
+              يمكنك الآن فتح الكورسات المدفوعة المنشورة
+              {plan.categoryName ? ` في قسم «${plan.categoryName}»` : ""} دون شراء كل كورس على حدة حتى هذا التاريخ.
             </p>
             <Link
               href="/courses"

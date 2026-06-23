@@ -1,6 +1,6 @@
 "use client";
 
-import { SubscriptionPlanCard, type SubscriptionPlanCardData } from "@/components/SubscriptionPlanCard";
+import { SubscriptionPlanCard, type SubscriptionPlanCardData, type ActiveSubscriptionForPlan } from "@/components/SubscriptionPlanCard";
 
 /** قسم الصفحة الرئيسية «الاشتراكات المتاحة» — نفس سلم العناوين مثل «اختر المدرسين» */
 export function HomeSubscriptionsSection({
@@ -9,13 +9,15 @@ export function HomeSubscriptionsSection({
   isStudent,
   isLoggedIn,
   studentPlatformSubscription,
+  studentActiveSubscriptions,
 }: {
   enabled: boolean;
   plans: SubscriptionPlanCardData[];
   isStudent: boolean;
   isLoggedIn: boolean;
-  /** اشتراك منصة نشط للطالب الحالي (إن وُجد) */
+  /** @deprecated استخدم studentActiveSubscriptions */
   studentPlatformSubscription?: { active: boolean; expiresAtIso: string | null } | null;
+  studentActiveSubscriptions?: ActiveSubscriptionForPlan[];
 }) {
   if (!enabled) return null;
 
@@ -48,7 +50,7 @@ export function HomeSubscriptionsSection({
             />
           </svg>
           <p className="mt-3 max-w-xl text-sm text-[var(--color-muted)]">
-            اشترك لفترة محددة واستمتع بكل الكورسات المدفوعة المنشورة دون شراء كل كورس على حدة
+            اشترك لفترة محددة واستمتع بكل الكورسات المدفوعة في القسم الذي تختاره دون شراء كل كورس على حدة
           </p>
         </div>
 
@@ -64,8 +66,12 @@ export function HomeSubscriptionsSection({
                 plan={p}
                 isStudent={isStudent}
                 isLoggedIn={isLoggedIn}
-                hasActivePlatformSubscription={!!studentPlatformSubscription?.active}
-                activePlatformSubscriptionExpiresAtIso={studentPlatformSubscription?.expiresAtIso ?? null}
+                activeSubscriptions={
+                  studentActiveSubscriptions ??
+                  (studentPlatformSubscription?.active && studentPlatformSubscription.expiresAtIso
+                    ? [{ categoryId: p.categoryId, expiresAtIso: studentPlatformSubscription.expiresAtIso }]
+                    : [])
+                }
               />
             ))}
           </div>

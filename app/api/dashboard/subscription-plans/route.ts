@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { createSubscriptionPlan, listSubscriptionPlansAll } from "@/lib/db";
+import { revalidatePublicCache, PUBLIC_CACHE_TAGS } from "@/lib/public-data-cache";
 import type { SubscriptionDurationKind } from "@/lib/types";
 
 export async function GET() {
@@ -30,6 +31,7 @@ export async function POST(request: NextRequest) {
     durationKind?: string;
     price?: number;
     isActive?: boolean;
+    categoryId?: string;
   };
   try {
     body = await request.json();
@@ -43,6 +45,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "اختر مدة: week أو month أو year" }, { status: 400 });
   }
   const price = typeof body.price === "number" && Number.isFinite(body.price) ? Math.max(0, body.price) : 0;
+  const categoryId = body.categoryId?.trim();
+  if (!categoryId) return NextResponse.json({ error: "يجب اختيار قسم للباقة" }, { status: 400 });
   try {
     const { id } = await createSubscriptionPlan({
       name,
@@ -51,7 +55,9 @@ export async function POST(request: NextRequest) {
       duration_kind: dk,
       price,
       is_active: body.isActive !== false,
+      category_id: categoryId,
     });
+    revalidatePublicCache(PUBLIC_CACHE_TAGS.subscriptions);
     return NextResponse.json({ success: true, id });
   } catch (e) {
     console.error("POST subscription-plans", e);

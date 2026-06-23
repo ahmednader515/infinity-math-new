@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { deleteSubscriptionPlan, updateSubscriptionPlan } from "@/lib/db";
+import { revalidatePublicCache, PUBLIC_CACHE_TAGS } from "@/lib/public-data-cache";
 import type { SubscriptionDurationKind } from "@/lib/types";
 
 type Params = { params: Promise<{ id: string }> };
@@ -13,6 +14,7 @@ type PlanPatch = {
   duration_kind?: SubscriptionDurationKind;
   price?: number;
   is_active?: boolean;
+  category_id?: string;
 };
 
 export async function PATCH(request: NextRequest, { params }: Params) {
@@ -28,6 +30,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     durationKind?: string;
     price?: number;
     isActive?: boolean;
+    categoryId?: string;
   };
   try {
     body = await request.json();
@@ -47,6 +50,11 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   }
   if (body.price !== undefined) patch.price = Math.max(0, Number(body.price) || 0);
   if (body.isActive !== undefined) patch.is_active = !!body.isActive;
+  if (body.categoryId !== undefined) {
+    const categoryId = body.categoryId.trim();
+    if (!categoryId) return NextResponse.json({ error: "يجب اختيار قسم للباقة" }, { status: 400 });
+    patch.category_id = categoryId;
+  }
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: "لا توجد حقول للتحديث" }, { status: 400 });
   }
@@ -58,7 +66,9 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       duration_kind: patch.duration_kind,
       price: patch.price,
       is_active: patch.is_active,
+      category_id: patch.category_id,
     });
+    revalidatePublicCache(PUBLIC_CACHE_TAGS.subscriptions);
   } catch (e) {
     console.error("PATCH subscription-plans/[id]", e);
     return NextResponse.json({ error: "فشل التحديث" }, { status: 500 });
@@ -74,6 +84,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
   const { id } = await params;
   try {
     await deleteSubscriptionPlan(id);
+    revalidatePublicCache(PUBLIC_CACHE_TAGS.subscriptions);
   } catch (e) {
     console.error("DELETE subscription-plans/[id]", e);
     return NextResponse.json({ error: "تعذر الحذف — قد تكون الباقة مرتبطة بسجلات" }, { status: 409 });

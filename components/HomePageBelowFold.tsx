@@ -1,8 +1,7 @@
 import Link from "next/link";
 import type { Session } from "next-auth";
 import {
-  userHasActivePlatformSubscription,
-  getLatestPlatformSubscriptionExpiry,
+  listActivePlatformSubscriptionsForUser,
 } from "@/lib/db";
 import {
   getCategoriesCached,
@@ -90,17 +89,16 @@ export async function HomePageBelowFold({
     needsStudentSubscription && session?.user?.id
       ? (async () => {
           try {
-            const active = await userHasActivePlatformSubscription(session.user!.id!);
-            const exp = active ? await getLatestPlatformSubscriptionExpiry(session.user!.id!) : null;
-            return {
-              active,
-              expiresAtIso: exp ? exp.toISOString() : null,
-            };
+            const subs = await listActivePlatformSubscriptionsForUser(session.user!.id!);
+            return subs.map((sub) => ({
+              categoryId: sub.categoryId,
+              expiresAtIso: sub.expiresAt.toISOString(),
+            }));
           } catch {
-            return { active: false, expiresAtIso: null };
+            return [];
           }
         })()
-      : Promise.resolve(null),
+      : Promise.resolve([] as Array<{ categoryId: string | null; expiresAtIso: string }>),
   ]);
 
   teachersForHome = teachersResult;
@@ -108,7 +106,7 @@ export async function HomePageBelowFold({
   storeProductsHome = storeProductsResult;
   [courses, categories] = catalogResult;
   reviews = reviewsResult;
-  const studentPlatformSubscription = studentSubscriptionResult;
+  const studentActiveSubscriptions = studentSubscriptionResult;
 
   if (homepageSettings.teachersEnabled && teachersForHome.length > 0) {
     const teacherAccountIds = new Set(teachersForHome.map((t) => t.id));
@@ -285,7 +283,7 @@ export async function HomePageBelowFold({
           plans={subscriptionPlansHome}
           isStudent={session?.user?.role === "STUDENT"}
           isLoggedIn={!!session}
-          studentPlatformSubscription={studentPlatformSubscription}
+          studentActiveSubscriptions={studentActiveSubscriptions}
         />
       ) : null}
 

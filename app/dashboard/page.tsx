@@ -12,9 +12,8 @@ import {
   getCoursesWithCountsForCreator,
   getSubscriptionsFeatureEnabled,
   listActiveSubscriptionPlansPublic,
+  listActivePlatformSubscriptionsForUser,
   listStudentStorePurchases,
-  userHasActivePlatformSubscription,
-  getLatestPlatformSubscriptionExpiry,
 } from "@/lib/db";
 import { getServerTranslator } from "@/lib/i18n/server";
 import { MyCoursesSection } from "./MyCoursesSection";
@@ -153,16 +152,13 @@ export default async function DashboardPage() {
 
     let subscriptionsFeature = false;
     let subscriptionPlansForStudent: Awaited<ReturnType<typeof listActiveSubscriptionPlansPublic>> = [];
-    let studentHasActiveSub = false;
-    let studentSubExpiresIso: string | null = null;
+    let studentActiveSubscriptions: Awaited<ReturnType<typeof listActivePlatformSubscriptionsForUser>> = [];
     let storePurchases: Awaited<ReturnType<typeof listStudentStorePurchases>> = [];
     try {
       subscriptionsFeature = await getSubscriptionsFeatureEnabled();
       if (subscriptionsFeature) {
         subscriptionPlansForStudent = await listActiveSubscriptionPlansPublic();
-        studentHasActiveSub = await userHasActivePlatformSubscription(session.user.id);
-        const exp = studentHasActiveSub ? await getLatestPlatformSubscriptionExpiry(session.user.id) : null;
-        studentSubExpiresIso = exp ? exp.toISOString() : null;
+        studentActiveSubscriptions = await listActivePlatformSubscriptionsForUser(session.user.id);
       }
       storePurchases = await listStudentStorePurchases(session.user.id).catch(() => []);
     } catch {
@@ -236,8 +232,10 @@ export default async function DashboardPage() {
         {subscriptionsFeature ? (
           <StudentSubscriptionsPanel
             plans={subscriptionPlansForStudent}
-            hasActivePlatformSubscription={studentHasActiveSub}
-            activePlatformSubscriptionExpiresAtIso={studentSubExpiresIso}
+            activeSubscriptions={studentActiveSubscriptions.map((sub) => ({
+              categoryId: sub.categoryId,
+              expiresAtIso: sub.expiresAt.toISOString(),
+            }))}
           />
         ) : null}
 
