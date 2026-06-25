@@ -84,6 +84,7 @@ export default async function EditCoursePage({ params }: Props) {
     lessons: data.lessons.map((l) => {
       const row = l as Record<string, unknown>;
       return {
+        id: String(row.id ?? ""),
         title: String(row.title ?? ""),
         videoUrl: String(row.videoUrl ?? row.video_url ?? ""),
         content: String(row.content ?? ""),

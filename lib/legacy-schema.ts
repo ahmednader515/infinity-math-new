@@ -219,6 +219,7 @@ export function parseLegacyQuestionOptions(
         text,
         is_correct: text === correctAnswer,
         question_id: questionId,
+        position: index + 1,
         created_at: now,
         updated_at: now,
       };

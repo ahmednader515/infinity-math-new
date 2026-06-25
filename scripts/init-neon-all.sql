@@ -268,6 +268,7 @@ CREATE TABLE IF NOT EXISTS "QuestionOption" (
   question_id TEXT NOT NULL REFERENCES "Question"(id) ON DELETE CASCADE,
   text        TEXT NOT NULL,
   is_correct  BOOLEAN NOT NULL DEFAULT false,
+  position    INT NOT NULL DEFAULT 1,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -1542,12 +1543,13 @@ BEGIN
         IF opt_text IS NULL THEN
           CONTINUE;
         END IF;
-        INSERT INTO "QuestionOption" (id, question_id, text, is_correct, created_at, updated_at)
+        INSERT INTO "QuestionOption" (id, question_id, text, is_correct, position, created_at, updated_at)
         VALUES (
           r.id || '-opt-' || i,
           r.id,
           opt_text,
           opt_text = COALESCE(r."correctAnswer", ''),
+          i + 1,
           NOW(),
           NOW()
         )

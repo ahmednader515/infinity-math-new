@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS "QuestionOption" (
   question_id TEXT NOT NULL REFERENCES "Question"(id) ON DELETE CASCADE,
   text        TEXT NOT NULL,
   is_correct  BOOLEAN NOT NULL DEFAULT false,
+  position    INT NOT NULL DEFAULT 1,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

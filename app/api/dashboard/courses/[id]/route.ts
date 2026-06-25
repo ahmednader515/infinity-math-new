@@ -7,12 +7,11 @@ import {
   getCourseForEdit,
   updateCourse,
   deleteCourse,
-  deleteLessonsByCourseId,
-  createLesson,
   findCategoryByNameForDashboard,
   createCategory,
   categoryIsManageableOnDashboard,
 } from "@/lib/db";
+import { syncCourseLessons } from "@/lib/save-course-lessons";
 import {
   saveCourseQuizzes,
   type CourseContentOrderEntry,
@@ -20,7 +19,15 @@ import {
 } from "@/lib/save-course-quizzes";
 import { revalidatePublicCache, PUBLIC_CACHE_TAGS } from "@/lib/public-data-cache";
 
-type LessonInput = { title: string; titleAr?: string; videoUrl?: string; content?: string; pdfUrl?: string; acceptsHomework?: boolean };
+type LessonInput = {
+  id?: string;
+  title: string;
+  titleAr?: string;
+  videoUrl?: string;
+  content?: string;
+  pdfUrl?: string;
+  acceptsHomework?: boolean;
+};
 type ContentOrderEntry = CourseContentOrderEntry;
 
 /** تحديث دورة - للأدمن ومساعد الأدمن */
@@ -136,7 +143,6 @@ export async function PUT(
     ...(body.acceptsHomework !== undefined && { accepts_homework: body.acceptsHomework }),
   });
 
-  await deleteLessonsByCourseId(id);
   const lessons = body.lessons ?? [];
   const quizzes = body.quizzes ?? [];
   const contentOrder: ContentOrderEntry[] =
@@ -146,23 +152,12 @@ export async function PUT(
       ...quizzes.map((_, i) => ({ type: "quiz" as const, index: i })),
     ] satisfies ContentOrderEntry[]);
 
-  for (let i = 0; i < lessons.length; i++) {
-    const le = lessons[i];
-    const lessonSlug = `${slug}-${i + 1}`.replace(/\s+/g, "-");
-    const order = contentOrder.findIndex((e) => e.type === "lesson" && e.index === i);
-    const orderVal = order >= 0 ? order : i;
-    await createLesson({
-      course_id: id,
-      title: le.title?.trim() || `حصة ${i + 1}`,
-      title_ar: le.titleAr?.trim() || null,
-      slug: lessonSlug,
-      content: le.content?.trim() || null,
-      video_url: le.videoUrl?.trim() || null,
-      pdf_url: le.pdfUrl?.trim() || null,
-      order: orderVal,
-      accepts_homework: !!le.acceptsHomework,
-    });
-  }
+  await syncCourseLessons({
+    courseId: id,
+    courseSlug: slug,
+    lessons,
+    contentOrder,
+  });
 
   await saveCourseQuizzes({
     courseId: id,
@@ -217,6 +212,7 @@ export async function GET(
     maxQuizAttempts: c.maxQuizAttempts ?? c.max_quiz_attempts ?? null,
     categoryId: (c as { categoryId?: string | null }).categoryId ?? null,
     lessons: data.lessons.map((l) => ({
+      id: String((l as { id?: string }).id ?? ""),
       title: l.title,
       titleAr: l.titleAr ?? l.title_ar,
       videoUrl: l.videoUrl ?? l.video_url,

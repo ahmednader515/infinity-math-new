@@ -28,8 +28,12 @@ export type QuizApiPayload = {
   maxQuizAttempts?: number | null;
   /** Previously passed (any attempt) — unlimited retries still allow restart */
   hasPassed?: boolean;
+  hasSubmitted?: boolean;
+  latestAttemptId?: string | null;
+  inProgressAttemptId?: string | null;
   resultScore?: number | null;
   resultTotal?: number | null;
+  resultPercentage?: number | null;
   nextContent?: { href: string; label: string; type: "lesson" | "quiz" } | null;
 };
 
@@ -105,7 +109,7 @@ export function QuizPageClient({ quizId, courseId }: { quizId: string; courseId?
     : `/courses/${quiz.course.id}`;
 
   const q = quiz as QuizApiPayload & { canAttempt?: boolean; attemptsUsed?: number; maxQuizAttempts?: number | null };
-  if (q.canAttempt === false) {
+  if (q.canAttempt === false && !q.hasSubmitted) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
         <Link href={courseHref} className="text-sm font-medium text-[var(--color-primary)] hover:underline">

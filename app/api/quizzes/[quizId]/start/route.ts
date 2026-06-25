@@ -3,8 +3,9 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import {
   getQuizById,
-  countQuizAttemptsByUserAndCourse,
+  countSubmittedQuizAttemptsByUserAndCourse,
   createQuizAttemptReturningId,
+  getInProgressQuizAttemptId,
   canStudentAccessQuizInCourse,
   isRemedialQuizUnlocked,
   quizBelongsToCourse,
@@ -91,12 +92,16 @@ export async function POST(
     }
 
     const maxAttempts = result.course.max_quiz_attempts ?? result.course.maxQuizAttempts;
-    let attemptsUsed = 0;
     if (typeof maxAttempts === "number" && maxAttempts > 0) {
-      attemptsUsed = await countQuizAttemptsByUserAndCourse(session.user.id, courseId);
+      const attemptsUsed = await countSubmittedQuizAttemptsByUserAndCourse(session.user.id, courseId);
       if (attemptsUsed >= maxAttempts) {
         return NextResponse.json({ error: "تم استنفاد المحاولات" }, { status: 403 });
       }
+    }
+
+    const existingAttemptId = await getInProgressQuizAttemptId(session.user.id, quizId);
+    if (existingAttemptId) {
+      return NextResponse.json({ success: true, attemptId: existingAttemptId, resumed: true });
     }
 
     const attemptId = await createQuizAttemptReturningId(session.user.id, quizId, 0, 0);

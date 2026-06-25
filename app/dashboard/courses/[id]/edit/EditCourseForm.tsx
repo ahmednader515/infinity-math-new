@@ -20,7 +20,7 @@ import { QuestionImageField } from "../../QuestionImageField";
 export type { ContentOrderEntry };
 
 type CategoryOption = { id: string; name: string; nameAr?: string | null };
-type LessonRow = { title: string; videoUrl: string; content: string; pdfUrl: string; acceptsHomework: boolean };
+type LessonRow = { id?: string; title: string; videoUrl: string; content: string; pdfUrl: string; acceptsHomework: boolean };
 type QuestionOptionRow = { text: string; isCorrect: boolean };
 type QuestionRow = { type: "MULTIPLE_CHOICE" | "TRUE_FALSE"; questionText: string; imageUrl: string; options: QuestionOptionRow[] };
 
@@ -107,7 +107,11 @@ export function EditCourseForm({ courseId, initialData }: { courseId: string; in
       ? initialData.lessons.map((l) => {
           const r = l as Record<string, unknown>;
           return {
-            ...l,
+            id: r.id != null ? String(r.id) : undefined,
+            title: String(r.title ?? ""),
+            videoUrl: String(r.videoUrl ?? r.video_url ?? ""),
+            content: String(r.content ?? ""),
+            pdfUrl: String(r.pdfUrl ?? r.pdf_url ?? ""),
             acceptsHomework: Boolean(r.acceptsHomework ?? r.accepts_homework ?? false),
           };
         })
@@ -410,6 +414,7 @@ export function EditCourseForm({ courseId, initialData }: { courseId: string; in
       .filter((q) => q.title.trim())
       .filter((q) => q.questions.some((qt) => qt.questionText.trim()) && q.questions.filter((qt) => qt.questionText.trim()).length > 0)
       .map((q) => ({
+        id: q.id,
         title: q.title.trim(),
         quizType: q.quizType,
         parentQuizRef: q.quizType === "REMEDIAL" ? q.parentQuizRef : null,
@@ -461,6 +466,7 @@ export function EditCourseForm({ courseId, initialData }: { courseId: string; in
         ? { categoryNameAr: form.categoryNameAr.trim() }
         : form.categoryId ? { categoryId: form.categoryId } : { categoryId: null }),
       lessons: validLessons.map((l) => ({
+        id: l.id?.trim() || undefined,
         title: l.title.trim(),
         videoUrl: l.videoUrl.trim() || undefined,
         content: l.content.trim() || undefined,
