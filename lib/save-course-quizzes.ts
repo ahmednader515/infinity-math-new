@@ -28,6 +28,7 @@ export type CourseQuizInput = {
   id?: string;
   title: string;
   timeLimitMinutes?: number | null;
+  maxAttempts?: number | null;
   quizType?: QuizType;
   parentQuizRef?: ParentQuizRef | null;
   questions: QuestionInput[];
@@ -116,6 +117,10 @@ export async function saveCourseQuizzes(params: {
       time_limit_minutes: timeLimitMinutes,
       quiz_type: quizType,
       parent_quiz_id: parentFromLinked,
+      max_attempts:
+        typeof q.maxAttempts === "number" && Number.isFinite(q.maxAttempts) && q.maxAttempts >= 1
+          ? Math.floor(q.maxAttempts)
+          : null,
     };
 
     let activeQuizId: string;

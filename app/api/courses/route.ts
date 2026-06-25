@@ -125,7 +125,7 @@ export async function POST(request: NextRequest) {
       price: body.price ?? 0,
       is_published: true,
       created_by_id: session.user.id,
-      max_quiz_attempts: body.maxQuizAttempts ?? null,
+      max_quiz_attempts: null,
       category_id: categoryId,
       accepts_homework: !!body.acceptsHomework,
     });

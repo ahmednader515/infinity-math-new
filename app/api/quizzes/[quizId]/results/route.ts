@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import {
   getQuizById,
   getQuizAttemptById,
-  countSubmittedQuizAttemptsByUserAndCourse,
+  countSubmittedQuizAttemptsByUserAndQuiz,
   canStudentAccessQuizInCourse,
   isRemedialQuizUnlocked,
   quizBelongsToCourse,
@@ -13,6 +13,7 @@ import {
   getLatestQuizAttemptsMap,
 } from "@/lib/db";
 import { QUIZ_PASS_PERCENT, quizAttemptPassed } from "@/lib/course-content";
+import { parseQuizMaxAttempts } from "@/lib/quiz-attempts";
 import { getNextNavAfterQuizSubmit } from "@/lib/course-progression-server";
 
 export async function GET(
@@ -73,11 +74,11 @@ export async function GET(
     const passed = quizAttemptPassed(attempt.score, attempt.totalQuestions);
     const percentage = Math.round((attempt.score / attempt.totalQuestions) * 100);
 
-    const maxAttempts = result.course.max_quiz_attempts ?? result.course.maxQuizAttempts;
+    const maxAttempts = parseQuizMaxAttempts(result.quiz as Record<string, unknown>);
     let attemptsUsed = 0;
     let canRetry = true;
-    if (!isStaff && typeof maxAttempts === "number" && maxAttempts > 0) {
-      attemptsUsed = await countSubmittedQuizAttemptsByUserAndCourse(session.user.id, courseId);
+    if (!isStaff && maxAttempts != null) {
+      attemptsUsed = await countSubmittedQuizAttemptsByUserAndQuiz(session.user.id, quizId);
       canRetry = attemptsUsed < maxAttempts;
     } else if (!isStaff) {
       canRetry = true;
@@ -150,7 +151,7 @@ export async function GET(
       nextContent,
       canRetry,
       attemptsUsed,
-      maxQuizAttempts: typeof maxAttempts === "number" ? maxAttempts : null,
+      maxQuizAttempts: maxAttempts,
     });
   } catch (e) {
     console.error("API quizzes [quizId] results:", e);

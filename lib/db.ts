@@ -4156,6 +4156,7 @@ export async function ensureQuizFeaturesSchema(): Promise<void> {
     await sql`CREATE INDEX IF NOT EXISTS "QuizCourseAssignment_courseId_idx" ON "QuizCourseAssignment"("courseId")`;
     await sql`CREATE INDEX IF NOT EXISTS "QuizCourseAssignment_quizId_idx" ON "QuizCourseAssignment"("quizId")`;
     await sql`ALTER TABLE "QuizAttempt" ADD COLUMN IF NOT EXISTS answers_json TEXT`;
+    await sql`ALTER TABLE "Quiz" ADD COLUMN IF NOT EXISTS max_attempts INT`;
     await backfillQuestionImageUrls();
   });
 }
@@ -4361,6 +4362,7 @@ function mapQuizRow(row: Record<string, unknown>, legacy: boolean): Record<strin
     ...base,
     quizType: normalizeQuizType(base.quizType ?? base.quiz_type),
     parentQuizId: (base.parentQuizId ?? base.parent_quiz_id ?? null) as string | null,
+    maxAttempts: base.maxAttempts ?? base.max_attempts ?? null,
   };
 }
 
@@ -4641,23 +4643,25 @@ export async function createQuiz(data: {
   time_limit_minutes?: number | null;
   quiz_type?: QuizType;
   parent_quiz_id?: string | null;
+  max_attempts?: number | null;
 }): Promise<Quiz> {
   await ensureQuizFeaturesSchema();
   const legacy = (await detectSchemaMode(sql)) === "legacy";
   const id = generateId();
   const quizType = normalizeQuizType(data.quiz_type ?? "NORMAL");
   const parentQuizId = data.parent_quiz_id?.trim() || null;
+  const maxAttempts = typeof data.max_attempts === "number" && data.max_attempts >= 1 ? data.max_attempts : null;
 
   if (legacy) {
     await sql`
       INSERT INTO "Quiz" (id, "courseId", title, position, "isPublished", timer, "maxAttempts", "quizType", "parentQuizId", "createdAt", "updatedAt")
-      VALUES (${id}, ${data.course_id}, ${data.title}, ${data.order}, true, ${data.time_limit_minutes ?? null}, 1, ${quizType}, ${parentQuizId}, NOW(), NOW())
+      VALUES (${id}, ${data.course_id}, ${data.title}, ${data.order}, true, ${data.time_limit_minutes ?? null}, ${maxAttempts ?? 1}, ${quizType}, ${parentQuizId}, NOW(), NOW())
     `;
   } else {
     const runInsert = async () => {
       await sql`
-        INSERT INTO "Quiz" (id, course_id, title, "order", time_limit_minutes, quiz_type, parent_quiz_id)
-        VALUES (${id}, ${data.course_id}, ${data.title}, ${data.order}, ${data.time_limit_minutes ?? null}, ${quizType}, ${parentQuizId})
+        INSERT INTO "Quiz" (id, course_id, title, "order", time_limit_minutes, quiz_type, parent_quiz_id, max_attempts)
+        VALUES (${id}, ${data.course_id}, ${data.title}, ${data.order}, ${data.time_limit_minutes ?? null}, ${quizType}, ${parentQuizId}, ${maxAttempts})
       `;
     };
     try {
@@ -4699,12 +4703,14 @@ export async function updateQuiz(
     time_limit_minutes?: number | null;
     quiz_type?: QuizType;
     parent_quiz_id?: string | null;
+    max_attempts?: number | null;
   },
 ): Promise<void> {
   await ensureQuizFeaturesSchema();
   const legacy = (await detectSchemaMode(sql)) === "legacy";
   const quizType = normalizeQuizType(data.quiz_type ?? "NORMAL");
   const parentQuizId = data.parent_quiz_id?.trim() || null;
+  const maxAttempts = typeof data.max_attempts === "number" && data.max_attempts >= 1 ? data.max_attempts : null;
 
   if (legacy) {
     await sql`
@@ -4712,6 +4718,7 @@ export async function updateQuiz(
       SET title = ${data.title},
           position = ${data.order},
           timer = ${data.time_limit_minutes ?? null},
+          "maxAttempts" = ${maxAttempts ?? 1},
           "quizType" = ${quizType},
           "parentQuizId" = ${parentQuizId},
           "updatedAt" = NOW()
@@ -4727,6 +4734,7 @@ export async function updateQuiz(
         time_limit_minutes = ${data.time_limit_minutes ?? null},
         quiz_type = ${quizType},
         parent_quiz_id = ${parentQuizId},
+        max_attempts = ${maxAttempts},
         updated_at = NOW()
     WHERE id = ${quizId}
   `;
@@ -5855,6 +5863,19 @@ export async function countSubmittedQuizAttemptsByUserAndCourse(
             )
           )
       `;
+  return Number((rows[0] as { c: number })?.c ?? 0);
+}
+
+/** Count submitted attempts for a single quiz. */
+export async function countSubmittedQuizAttemptsByUserAndQuiz(
+  userId: string,
+  quizId: string,
+): Promise<number> {
+  await ensureQuizFeaturesSchema();
+  const rows = await sql`
+    SELECT COUNT(*)::int as c FROM "QuizAttempt"
+    WHERE user_id = ${userId} AND quiz_id = ${quizId} AND total_questions >= 1
+  `;
   return Number((rows[0] as { c: number })?.c ?? 0);
 }
 

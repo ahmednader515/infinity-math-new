@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import {
   getQuizById,
-  countSubmittedQuizAttemptsByUserAndCourse,
+  countSubmittedQuizAttemptsByUserAndQuiz,
   createQuizAttempt,
   updateQuizAttemptById,
   canStudentAccessQuizInCourse,
@@ -16,6 +16,7 @@ import {
   getInProgressQuizAttemptId,
 } from "@/lib/db";
 import { QUIZ_PASS_PERCENT, quizAttemptPassed } from "@/lib/course-content";
+import { parseQuizMaxAttempts } from "@/lib/quiz-attempts";
 import { getNextNavAfterQuizSubmit } from "@/lib/course-progression-server";
 
 /**
@@ -62,13 +63,13 @@ export async function GET(
       return NextResponse.json({ error: "غير مسجّل في هذه الدورة أو لا تملك صلاحية لهذا الاختبار" }, { status: 403 });
     }
 
-    const maxAttempts = result.course.max_quiz_attempts ?? result.course.maxQuizAttempts;
+    const maxAttempts = parseQuizMaxAttempts(result.quiz as Record<string, unknown>);
     let canAttempt = true;
     let attemptsUsed = 0;
     let inProgressAttemptId: string | null = null;
-    if (session?.user?.id && typeof maxAttempts === "number" && maxAttempts > 0) {
+    if (session?.user?.id && maxAttempts != null) {
       if (isStaff || (await canStudentAccessQuizInCourse(session.user.id, quizId, courseId))) {
-        attemptsUsed = await countSubmittedQuizAttemptsByUserAndCourse(session.user.id, courseId);
+        attemptsUsed = await countSubmittedQuizAttemptsByUserAndQuiz(session.user.id, quizId);
         inProgressAttemptId = await getInProgressQuizAttemptId(session.user.id, quizId);
         if (attemptsUsed >= maxAttempts && !inProgressAttemptId) {
           canAttempt = false;
@@ -109,7 +110,7 @@ export async function GET(
           isCorrect: o.isCorrect ?? o.is_correct,
         })),
       })),
-      maxQuizAttempts: typeof maxAttempts === "number" ? maxAttempts : null,
+      maxQuizAttempts: maxAttempts,
       attemptsUsed,
       canAttempt,
       inProgressAttemptId,
@@ -235,10 +236,10 @@ export async function POST(
       return NextResponse.json({ error: "غير مسجّل في هذه الدورة" }, { status: 403 });
     }
 
-    const maxAttempts = result.course.max_quiz_attempts ?? result.course.maxQuizAttempts;
+    const maxAttempts = parseQuizMaxAttempts(result.quiz as Record<string, unknown>);
     const attemptId = typeof body.attemptId === "string" && body.attemptId.trim() ? body.attemptId.trim() : null;
-    if (typeof maxAttempts === "number" && maxAttempts > 0) {
-      const used = await countSubmittedQuizAttemptsByUserAndCourse(session.user.id, courseId);
+    if (maxAttempts != null) {
+      const used = await countSubmittedQuizAttemptsByUserAndQuiz(session.user.id, quizId);
       const inProgress = attemptId
         ? attemptId
         : await getInProgressQuizAttemptId(session.user.id, quizId);
@@ -283,8 +284,8 @@ export async function POST(
     let canRetry = true;
 
     if (!isStaff) {
-      if (typeof maxAttempts === "number" && maxAttempts > 0) {
-        attemptsUsed = await countSubmittedQuizAttemptsByUserAndCourse(session.user.id, courseId);
+      if (maxAttempts != null) {
+        attemptsUsed = await countSubmittedQuizAttemptsByUserAndQuiz(session.user.id, quizId);
         canRetry = attemptsUsed < maxAttempts;
       }
       const hasFull = await hasFullCourseAccessAsStudent(session.user.id, courseId);
@@ -321,7 +322,7 @@ export async function POST(
       nextContent,
       canRetry,
       attemptsUsed,
-      maxQuizAttempts: typeof maxAttempts === "number" ? maxAttempts : null,
+      maxQuizAttempts: maxAttempts,
     });
   } catch (e) {
     console.error("API quizzes [quizId] POST:", e);

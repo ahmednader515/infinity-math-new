@@ -138,7 +138,7 @@ export async function PUT(
     image_url: body.imageUrl?.trim() || null,
     price: body.price ?? 0,
     is_published: body.isPublished ?? true,
-    max_quiz_attempts: body.maxQuizAttempts ?? null,
+    max_quiz_attempts: null,
     ...(categoryId !== undefined && { category_id: categoryId }),
     ...(body.acceptsHomework !== undefined && { accepts_homework: body.acceptsHomework }),
   });
@@ -226,7 +226,14 @@ export async function GET(
       quizType: (q as { quizType?: string }).quizType ?? "NORMAL",
       parentQuizId: (q as { parentQuizId?: string | null }).parentQuizId ?? null,
       timeLimitMinutes: (q as { timeLimitMinutes?: number | null }).timeLimitMinutes ?? null,
-      questions: (q.questions ?? []).map((qt) => ({
+        maxAttempts: (() => {
+          const raw = (q as { maxAttempts?: number | null; max_attempts?: number | null }).maxAttempts
+            ?? (q as { max_attempts?: number | null }).max_attempts;
+          if (raw == null) return null;
+          const n = Number(raw);
+          return Number.isFinite(n) && n >= 1 ? n : null;
+        })(),
+        questions: (q.questions ?? []).map((qt) => ({
         type: qt.type,
         questionText: qt.questionText ?? qt.question_text,
         options: (qt.options ?? []).map((o) => ({ text: o.text, isCorrect: o.isCorrect ?? o.is_correct })),

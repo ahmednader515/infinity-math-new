@@ -359,6 +359,7 @@ export interface Quiz {
   time_limit_minutes?: number | null;
   quiz_type?: QuizType;
   parent_quiz_id?: string | null;
+  max_attempts?: number | null;
   created_at: Date;
   updated_at: Date;
 }

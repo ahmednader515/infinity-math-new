@@ -958,6 +958,8 @@ export const arMessages: Messages = {
       unlimitedPlaceholderLine: `فارغ = غير محدود`,
       quizAttemptsExplanation:
         "أقصى عدد مرات يسمح فيها للطالب بحل اختبارات هذا الكورس (مجموع كل الاختبارات). اتركه فارغاً لعدم التحديد.",
+      quizAttemptsPerQuizExplanation:
+        "أقصى عدد مرات يسمح فيها للطالب بحل هذا الاختبار فقط. اتركه فارغاً لعدم التحديد.",
       quizTitlePlaceholder: `عنوان الاختبار`,
       deleteQuiz: `حذف الاختبار`,
       quizDurationMinutes: `تحديد وقت الاختبار بالدقائق (اختياري)`,
