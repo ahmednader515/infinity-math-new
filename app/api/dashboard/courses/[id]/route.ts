@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { canManageCourse } from "@/lib/permissions";
+import { canManageCourse, readCourseManageIds } from "@/lib/permissions";
 import {
   getCourseById,
   getCourseForEdit,
@@ -77,7 +77,11 @@ export async function PUT(
     return NextResponse.json({ error: "الدورة غير موجودة" }, { status: 404 });
   }
   const createdBy = (course as { createdById?: string | null; created_by_id?: string | null }).createdById ?? (course as { created_by_id?: string | null }).created_by_id ?? null;
-  if (!canManageCourse(session.user.role, session.user.id, createdBy)) {
+  const assignedTeacherId =
+    (course as { assignedTeacherId?: string | null; assigned_teacher_id?: string | null }).assignedTeacherId ??
+    (course as { assigned_teacher_id?: string | null }).assigned_teacher_id ??
+    null;
+  if (!canManageCourse(session.user.role, session.user.id, createdBy, assignedTeacherId)) {
     return NextResponse.json({ error: "غير مصرح" }, { status: 403 });
   }
   const slug = (course as { slug?: string }).slug ?? "";
@@ -130,11 +134,13 @@ export async function PUT(
     }
   }
 
-  let createdByUpdate: string | undefined;
+  let assignedTeacherUpdate: string | undefined;
+  let createdByRestore: string | undefined;
   if (session.user.role === "ADMIN" && body.teacherId?.trim()) {
     try {
       await assertAssignableTeacher(body.teacherId.trim());
-      createdByUpdate = body.teacherId.trim();
+      assignedTeacherUpdate = body.teacherId.trim();
+      createdByRestore = session.user.id;
     } catch (err) {
       const msg = err instanceof Error ? err.message : "المدرس المحدد غير صالح";
       return NextResponse.json({ error: msg }, { status: 400 });
@@ -154,7 +160,8 @@ export async function PUT(
     max_quiz_attempts: null,
     ...(categoryId !== undefined && { category_id: categoryId }),
     ...(body.acceptsHomework !== undefined && { accepts_homework: body.acceptsHomework }),
-    ...(createdByUpdate !== undefined && { created_by_id: createdByUpdate }),
+    ...(assignedTeacherUpdate !== undefined && { assigned_teacher_id: assignedTeacherUpdate }),
+    ...(createdByRestore !== undefined && { created_by_id: createdByRestore }),
   });
 
   const lessons = body.lessons ?? [];
@@ -201,9 +208,14 @@ export async function GET(
   if (!data?.course) {
     return NextResponse.json({ error: "الدورة غير موجودة" }, { status: 404 });
   }
-  const c0 = data.course as { createdById?: string | null; created_by_id?: string | null };
-  const createdBy = c0.createdById ?? c0.created_by_id ?? null;
-  if (!canManageCourse(session.user.role, session.user.id, createdBy)) {
+  const c0 = data.course as {
+    createdById?: string | null;
+    created_by_id?: string | null;
+    assignedTeacherId?: string | null;
+    assigned_teacher_id?: string | null;
+  };
+  const { createdById: createdBy, assignedTeacherId } = readCourseManageIds(c0);
+  if (!canManageCourse(session.user.role, session.user.id, createdBy, assignedTeacherId)) {
     return NextResponse.json({ error: "غير مصرح" }, { status: 403 });
   }
 
@@ -225,7 +237,7 @@ export async function GET(
     isPublished: c.isPublished ?? c.is_published ?? true,
     maxQuizAttempts: c.maxQuizAttempts ?? c.max_quiz_attempts ?? null,
     categoryId: (c as { categoryId?: string | null }).categoryId ?? null,
-    teacherId: createdBy,
+    teacherId: assignedTeacherId ?? createdBy,
     lessons: data.lessons.map((l) => ({
       id: String((l as { id?: string }).id ?? ""),
       title: l.title,
@@ -285,8 +297,15 @@ export async function DELETE(
   if (!course) {
     return NextResponse.json({ error: "الدورة غير موجودة" }, { status: 404 });
   }
-  const createdByDel = (course as { createdById?: string | null; created_by_id?: string | null }).createdById ?? (course as { created_by_id?: string | null }).created_by_id ?? null;
-  if (!canManageCourse(session.user.role, session.user.id, createdByDel)) {
+  const { createdById: createdByDel, assignedTeacherId: assignedDel } = readCourseManageIds(
+    course as {
+      createdById?: string | null;
+      created_by_id?: string | null;
+      assignedTeacherId?: string | null;
+      assigned_teacher_id?: string | null;
+    },
+  );
+  if (!canManageCourse(session.user.role, session.user.id, createdByDel, assignedDel)) {
     return NextResponse.json({ error: "غير مصرح" }, { status: 403 });
   }
 

@@ -3,7 +3,7 @@ import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { authOptions } from "@/lib/auth";
 import { getCourseForEdit, getUsersByRole } from "@/lib/db";
-import { canManageCourse } from "@/lib/permissions";
+import { canManageCourse, readCourseManageIds } from "@/lib/permissions";
 import { EditCourseForm, type ContentOrderEntry } from "./EditCourseForm";
 
 type Props = { params: Promise<{ id: string }> };
@@ -61,13 +61,21 @@ export default async function EditCoursePage({ params }: Props) {
   if (!data?.course) notFound();
 
   const c = data.course as Record<string, unknown>;
-  const createdBy =
-    (c.createdById as string | null | undefined) ??
-    (c.created_by_id as string | null | undefined) ??
-    null;
-  if (!canManageCourse(role, session.user.id, createdBy)) {
+  const { createdById: createdBy, assignedTeacherId } = readCourseManageIds(c);
+  if (!canManageCourse(role, session.user.id, createdBy, assignedTeacherId)) {
     redirect("/dashboard");
   }
+  const isAdmin = role === "ADMIN";
+  const teachers = isAdmin
+    ? (await getUsersByRole("TEACHER")).map((u) => ({
+        id: u.id,
+        name: u.name ?? null,
+        email: u.email ?? null,
+      }))
+    : [];
+  const legacyAssignedTeacher =
+    assignedTeacherId ??
+    (teachers.some((t) => t.id === createdBy) ? createdBy : "");
   const initialData = {
     id: String(c.id ?? ""),
     titleEn: String(c.title ?? ""),
@@ -81,7 +89,7 @@ export default async function EditCoursePage({ params }: Props) {
     isPublished: Boolean(c.isPublished ?? c.is_published ?? true),
     maxQuizAttempts: typeof c.maxQuizAttempts === "number" ? c.maxQuizAttempts : typeof c.max_quiz_attempts === "number" ? c.max_quiz_attempts : null,
     categoryId: (c.categoryId ?? c.category_id ?? "") as string,
-    teacherId: createdBy ?? "",
+    teacherId: legacyAssignedTeacher ?? "",
     lessons: data.lessons.map((l) => {
       const row = l as Record<string, unknown>;
       return {
@@ -146,15 +154,6 @@ export default async function EditCoursePage({ params }: Props) {
       }),
     ),
   };
-
-  const isAdmin = role === "ADMIN";
-  const teachers = isAdmin
-    ? (await getUsersByRole("TEACHER")).map((u) => ({
-        id: u.id,
-        name: u.name ?? null,
-        email: u.email ?? null,
-      }))
-    : [];
 
   return (
     <div>

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { canManageCourse } from "@/lib/permissions";
+import { canManageCourse, readCourseManageIds } from "@/lib/permissions";
 import { getCourseForEdit } from "@/lib/db";
 
 /** جلب اختبارات دورة — للأدمن/مساعد الأدمن (عناوين فقط للاختيار في نطاق الكود) */
@@ -23,9 +23,10 @@ export async function GET(
     if (!data?.course) {
       return NextResponse.json({ error: "الدورة غير موجودة" }, { status: 404 });
     }
-    const c0 = data.course as { createdById?: string | null; created_by_id?: string | null };
-    const createdBy = c0.createdById ?? c0.created_by_id ?? null;
-    if (!canManageCourse(session.user.role, session.user.id, createdBy)) {
+    const { createdById: createdBy, assignedTeacherId } = readCourseManageIds(
+      data.course as { createdById?: string | null; created_by_id?: string | null; assignedTeacherId?: string | null; assigned_teacher_id?: string | null },
+    );
+    if (!canManageCourse(session.user.role, session.user.id, createdBy, assignedTeacherId)) {
       return NextResponse.json({ error: "غير مصرح" }, { status: 403 });
     }
     const quizzes = (data.quizzes ?? []).map((q) => ({

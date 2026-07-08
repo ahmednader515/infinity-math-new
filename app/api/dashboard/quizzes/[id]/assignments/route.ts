@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { getCourseCreatedById, getQuizOwnerCourseId, getQuizzesForAdminManage, syncQuizLinkedCourses } from "@/lib/db";
+import { getCourseManageIds, getQuizOwnerCourseId, getQuizzesForAdminManage, syncQuizLinkedCourses } from "@/lib/db";
 import { canManageCourse, isStaffRole } from "@/lib/permissions";
 import type { UserRole } from "@/lib/types";
 
@@ -22,8 +22,8 @@ export async function GET(_request: NextRequest, { params }: RouteContext) {
   if (!ownerCourseId) {
     return NextResponse.json({ error: "الاختبار غير موجود" }, { status: 404 });
   }
-  const createdBy = await getCourseCreatedById(ownerCourseId);
-  if (!canManageCourse(role, session.user.id, createdBy)) {
+  const { createdById: createdBy, assignedTeacherId } = await getCourseManageIds(ownerCourseId);
+  if (!canManageCourse(role, session.user.id, createdBy, assignedTeacherId)) {
     return NextResponse.json({ error: "غير مصرح" }, { status: 403 });
   }
 
@@ -55,8 +55,8 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
   if (!ownerCourseId) {
     return NextResponse.json({ error: "الاختبار غير موجود" }, { status: 404 });
   }
-  const createdBy = await getCourseCreatedById(ownerCourseId);
-  if (!canManageCourse(role, session.user.id, createdBy)) {
+  const { createdById: createdBy, assignedTeacherId } = await getCourseManageIds(ownerCourseId);
+  if (!canManageCourse(role, session.user.id, createdBy, assignedTeacherId)) {
     return NextResponse.json({ error: "غير مصرح" }, { status: 403 });
   }
 

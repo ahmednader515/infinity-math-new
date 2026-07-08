@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { canManageCourse } from "@/lib/permissions";
+import { canManageCourse, readCourseManageIds } from "@/lib/permissions";
 import { getCourseById, getLiveStreamsAll, getLiveStreamsForTeacher, createLiveStream } from "@/lib/db";
 
 /** قائمة كل البثوث — للأدمن ومساعد الأدمن؛ للمدرس: بثوث كورساته فقط */
@@ -49,8 +49,12 @@ export async function POST(request: NextRequest) {
   }
   if (session.user.role === "TEACHER") {
     const course = await getCourseById(courseId.trim());
-    const createdBy = course ? ((course as { createdById?: string | null; created_by_id?: string | null }).createdById ?? (course as { created_by_id?: string | null }).created_by_id ?? null) : null;
-    if (!course || !canManageCourse("TEACHER", session.user.id, createdBy)) {
+    const { createdById: createdBy, assignedTeacherId } = course
+      ? readCourseManageIds(
+          course as { createdById?: string | null; created_by_id?: string | null; assignedTeacherId?: string | null; assigned_teacher_id?: string | null },
+        )
+      : { createdById: null, assignedTeacherId: null };
+    if (!course || !canManageCourse("TEACHER", session.user.id, createdBy, assignedTeacherId)) {
       return NextResponse.json({ error: "غير مصرح بإضافة بث لهذا الكورس" }, { status: 403 });
     }
   }

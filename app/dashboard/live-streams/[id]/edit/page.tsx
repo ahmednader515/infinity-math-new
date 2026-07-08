@@ -3,7 +3,7 @@ import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { authOptions } from "@/lib/auth";
 import { getLiveStreamById, getCoursesAll, getCoursesWithCountsForCreator, getCourseById } from "@/lib/db";
-import { canManageCourse } from "@/lib/permissions";
+import { canManageCourse, readCourseManageIds } from "@/lib/permissions";
 import { LiveStreamForm } from "../../LiveStreamForm";
 
 type Props = { params: Promise<{ id: string }> };
@@ -33,11 +33,12 @@ export default async function EditLiveStreamPage({ params }: Props) {
   const s = stream as unknown as Record<string, unknown>;
   const streamCourseId = String(s.courseId ?? s.course_id ?? "");
   const courseForPerm = await getCourseById(streamCourseId);
-  const createdBy =
-    (courseForPerm as { createdById?: string | null; created_by_id?: string | null } | null)?.createdById ??
-    (courseForPerm as { created_by_id?: string | null } | null)?.created_by_id ??
-    null;
-  if (!canManageCourse(role, session.user.id, createdBy)) {
+  const { createdById: createdBy, assignedTeacherId } = courseForPerm
+    ? readCourseManageIds(
+        courseForPerm as { createdById?: string | null; created_by_id?: string | null; assignedTeacherId?: string | null; assigned_teacher_id?: string | null },
+      )
+    : { createdById: null, assignedTeacherId: null };
+  if (!canManageCourse(role, session.user.id, createdBy, assignedTeacherId)) {
     redirect("/dashboard");
   }
 

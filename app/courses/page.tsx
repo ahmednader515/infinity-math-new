@@ -1,5 +1,6 @@
 import { getCoursesPublishedCached } from "@/lib/public-data-cache";
 import { getTeacherIdsExcludedFromPublicCourseLists, getUserById } from "@/lib/db";
+import { courseIsHiddenFromPublicTeacherCatalog } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 import { TeacherCoursesSearch, type TeacherCourseListItem } from "./TeacherCoursesSearch";
 import { getServerTranslator } from "@/lib/i18n/server";
@@ -46,16 +47,20 @@ export default async function CoursesPage({ searchParams }: Props) {
 
   if (tid) {
     filtered = filtered.filter((c) => {
-      const row = c as { createdById?: string | null; created_by_id?: string | null };
+      const row = c as {
+        createdById?: string | null;
+        created_by_id?: string | null;
+        assignedTeacherId?: string | null;
+        assigned_teacher_id?: string | null;
+      };
       const creator = row.createdById ?? row.created_by_id ?? null;
-      return creator === tid;
+      const assigned = row.assignedTeacherId ?? row.assigned_teacher_id ?? null;
+      return creator === tid || assigned === tid;
     });
   } else if (hideTeacherCreators.size > 0) {
-    filtered = filtered.filter((c) => {
-      const row = c as { createdById?: string | null; created_by_id?: string | null };
-      const creator = row.createdById ?? row.created_by_id ?? null;
-      return !creator || !hideTeacherCreators.has(creator);
-    });
+    filtered = filtered.filter(
+      (c) => !courseIsHiddenFromPublicTeacherCatalog(c, hideTeacherCreators),
+    );
   }
 
   const categoryName =

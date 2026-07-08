@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { canManageCourse } from "@/lib/permissions";
+import { canManageCourse, readCourseManageIds } from "@/lib/permissions";
 import { getCourseById, getLiveStreamById, updateLiveStream, deleteLiveStream } from "@/lib/db";
 
 async function assertStaffCanAccessStream(
@@ -14,8 +14,10 @@ async function assertStaffCanAccessStream(
   if (!cid) return false;
   const course = await getCourseById(cid);
   if (!course) return false;
-  const createdBy = (course as { createdById?: string | null; created_by_id?: string | null }).createdById ?? (course as { created_by_id?: string | null }).created_by_id ?? null;
-  return canManageCourse(role, userId, createdBy);
+  const { createdById: createdBy, assignedTeacherId } = readCourseManageIds(
+    course as { createdById?: string | null; created_by_id?: string | null; assignedTeacherId?: string | null; assigned_teacher_id?: string | null },
+  );
+  return canManageCourse(role, userId, createdBy, assignedTeacherId);
 }
 
 /** جلب بث واحد */

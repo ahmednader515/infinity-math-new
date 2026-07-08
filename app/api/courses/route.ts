@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
   }
 
   const role = session.user.role;
-  let courseOwnerId = session.user.id;
+  let assignedTeacherId: string | null = null;
   if (role === "ADMIN") {
     const teacherId = body.teacherId?.trim();
     if (!teacherId) {
@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
     }
     try {
       await assertAssignableTeacher(teacherId);
-      courseOwnerId = teacherId;
+      assignedTeacherId = teacherId;
     } catch (err) {
       const msg = err instanceof Error ? err.message : "المدرس المحدد غير صالح";
       return NextResponse.json({ error: msg }, { status: 400 });
@@ -103,7 +103,8 @@ export async function POST(request: NextRequest) {
   let categoryId: string | null = null;
   const catNameAr = (body.categoryNameAr ?? body.categoryName)?.trim();
   const catNameEn = (body.categoryNameEn ?? catNameAr)?.trim();
-  const categoryOwnerId = role === "ADMIN" ? courseOwnerId : session.user.id;
+  const categoryOwnerId =
+    role === "ADMIN" && assignedTeacherId ? assignedTeacherId : session.user.id;
   if (catNameAr || catNameEn) {
     let cat =
       (catNameAr ? await findCategoryByNameForDashboard(catNameAr, categoryOwnerId, role) : null) ??
@@ -142,7 +143,8 @@ export async function POST(request: NextRequest) {
       image_url: body.imageUrl?.trim() || null,
       price: body.price ?? 0,
       is_published: true,
-      created_by_id: courseOwnerId,
+      created_by_id: session.user.id,
+      assigned_teacher_id: assignedTeacherId,
       max_quiz_attempts: body.maxQuizAttempts ?? null,
       category_id: categoryId,
       accepts_homework: !!body.acceptsHomework,

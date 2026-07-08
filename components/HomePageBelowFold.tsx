@@ -38,6 +38,7 @@ import {
 } from "@/lib/homepage-known-defaults";
 import { pickLocalizedText, settingTextOrDefault } from "@/lib/i18n/localized-field";
 import { selectTeachersForHomepagePreview } from "@/lib/db";
+import { courseIsHiddenFromPublicTeacherCatalog } from "@/lib/permissions";
 
 type CourseWithCategory = Awaited<ReturnType<typeof getCoursesPublishedCached>>[number];
 
@@ -110,13 +111,9 @@ export async function HomePageBelowFold({
 
   if (homepageSettings.teachersEnabled && teachersForHome.length > 0) {
     const teacherAccountIds = new Set(teachersForHome.map((t) => t.id));
-    courses = courses.filter((c) => {
-      const creator =
-        (c as { createdById?: string | null }).createdById ??
-        (c as { created_by_id?: string | null }).created_by_id ??
-        null;
-      return !creator || !teacherAccountIds.has(creator);
-    });
+    courses = courses.filter(
+      (c) => !courseIsHiddenFromPublicTeacherCatalog(c, teacherAccountIds),
+    );
   }
 
   const platformNewsSlides = parsePlatformNewsItems(homepageSettings.platformNewsItems);

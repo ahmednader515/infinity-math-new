@@ -8,7 +8,7 @@ import {
   deleteActivationCodes,
   getCourseById,
 } from "@/lib/db";
-import { canManageCourse } from "@/lib/permissions";
+import { canManageCourse, readCourseManageIds } from "@/lib/permissions";
 
 /** قائمة أكواد التفعيل — للأدمن/مساعد الأدمن. اختياري: courseId */
 export async function GET(request: NextRequest) {
@@ -51,8 +51,12 @@ export async function POST(request: NextRequest) {
   }
   if (session.user.role === "TEACHER") {
     const course = await getCourseById(courseId);
-    const createdBy = course ? ((course as { createdById?: string | null; created_by_id?: string | null }).createdById ?? (course as { created_by_id?: string | null }).created_by_id ?? null) : null;
-    if (!course || !canManageCourse("TEACHER", session.user.id, createdBy)) {
+    const { createdById: createdBy, assignedTeacherId } = course
+      ? readCourseManageIds(
+          course as { createdById?: string | null; created_by_id?: string | null; assignedTeacherId?: string | null; assigned_teacher_id?: string | null },
+        )
+      : { createdById: null, assignedTeacherId: null };
+    if (!course || !canManageCourse("TEACHER", session.user.id, createdBy, assignedTeacherId)) {
       return NextResponse.json({ error: "غير مصرح بتعديل هذه الدورة" }, { status: 403 });
     }
   }

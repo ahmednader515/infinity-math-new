@@ -298,6 +298,7 @@ export interface Course {
   order: number;
   category_id: string | null;
   created_by_id: string | null;
+  assigned_teacher_id?: string | null;
   accepts_homework?: boolean;
   /** متوسط تقييم الكورس المحسوب من كل تقييمات دروسه */
   course_rating?: number | null;

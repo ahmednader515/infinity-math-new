@@ -1548,16 +1548,25 @@ export async function listTeachersForHomepage(): Promise<TeacherHomepageRow[]> {
     });
     if (teachers.length === 0) return [];
 
+    await ensureCourseAssignedTeacherColumn();
     const courseRows = await sql`
-      SELECT c.id, c.slug, c.title, c.title_ar, c.created_by_id
+      SELECT c.id, c.slug, c.title, c.title_ar,
+        COALESCE(
+          c.assigned_teacher_id,
+          CASE WHEN u.role = 'TEACHER' THEN c.created_by_id END
+        ) AS teacher_list_id
       FROM "Course" c
-      INNER JOIN "User" u ON u.id = c.created_by_id AND u.role = 'TEACHER'
+      LEFT JOIN "User" u ON u.id = c.created_by_id
       WHERE c.is_published = true
+        AND COALESCE(
+          c.assigned_teacher_id,
+          CASE WHEN u.role = 'TEACHER' THEN c.created_by_id END
+        ) IS NOT NULL
       ORDER BY c."order" ASC, c.created_at DESC
     `;
     const byTeacher = new Map<string, TeacherHomepageCourse[]>();
     for (const r of courseRows as Record<string, unknown>[]) {
-      const tid = String(r.created_by_id ?? "");
+      const tid = String(r.teacher_list_id ?? "");
       if (!tid) continue;
       const titleAr = (r.title_ar as string | null)?.trim();
       const title = (r.title as string | null)?.trim() || "دورة";
@@ -3644,6 +3653,7 @@ export async function getCourseBySlugOrId(slugOrId: string): Promise<Course | nu
 
 export async function getCoursesPublished(withCategory = true): Promise<(Course & { category?: Category })[]> {
   await ensureLessonRatingsSchema();
+  await ensureCourseAssignedTeacherColumn();
   if ((await detectSchemaMode(sql)) === "legacy") {
     const rows = await sql`
       SELECT c.*
@@ -3714,6 +3724,7 @@ export async function getCoursesWithCounts(): Promise<
   >
 > {
   await ensureLessonRatingsSchema();
+  await ensureCourseAssignedTeacherColumn();
   if ((await detectSchemaMode(sql)) === "legacy") {
     const rows = await sql`
       SELECT c.*,
@@ -3755,7 +3766,7 @@ export async function getCoursesWithCounts(): Promise<
       u.id as teacher_id, u.name as teacher_name, u.email as teacher_email, u.role as teacher_role
     FROM "Course" c
     LEFT JOIN "Category" cat ON c.category_id = cat.id
-    LEFT JOIN "User" u ON u.id = c.created_by_id
+    LEFT JOIN "User" u ON u.id = COALESCE(c.assigned_teacher_id, c.created_by_id)
     ORDER BY cat."order" ASC NULLS LAST, c."order" ASC, c.created_at DESC
   `;
   return (rows as Record<string, unknown>[]).map((r) => {
@@ -3805,6 +3816,7 @@ export async function getCoursesWithCountsForCreator(
   >
 > {
   await ensureLessonRatingsSchema();
+  await ensureCourseAssignedTeacherColumn();
   if ((await detectSchemaMode(sql)) === "legacy") {
     const rows = await sql`
       SELECT c.*,
@@ -3829,7 +3841,7 @@ export async function getCoursesWithCountsForCreator(
       cat.id as cat_id, cat.name as cat_name, cat.name_ar as cat_name_ar, cat.slug as cat_slug, cat."order" as cat_order
     FROM "Course" c
     LEFT JOIN "Category" cat ON c.category_id = cat.id
-    WHERE c.created_by_id = ${creatorId}
+    WHERE c.created_by_id = ${creatorId} OR c.assigned_teacher_id = ${creatorId}
     ORDER BY cat."order" ASC NULLS LAST, c."order" ASC, c.created_at DESC
   `;
   return (rows as Record<string, unknown>[]).map((r) => {
@@ -3895,6 +3907,67 @@ async function ensureCourseBilingualColumns(): Promise<void> {
   });
 }
 
+async function ensureCourseAssignedTeacherColumn(): Promise<void> {
+  return ensureOnce("ensureCourseAssignedTeacherColumn_v2", async () => {
+    try {
+      await sql`ALTER TABLE "Course" ADD COLUMN IF NOT EXISTS assigned_teacher_id TEXT REFERENCES "User"(id) ON DELETE SET NULL`;
+    } catch {
+      try {
+        await sql`ALTER TABLE "Course" ADD COLUMN IF NOT EXISTS assigned_teacher_id TEXT`;
+      } catch {
+        /* DDL may be unavailable */
+      }
+    }
+    await repairAdminAssignedCourseOwnership();
+  });
+}
+
+/** يصلح دورات أُسندت للمدرس عبر created_by_id قبل وجود assigned_teacher_id */
+async function repairAdminAssignedCourseOwnership(): Promise<void> {
+  try {
+    const adminRows = await sql`
+      SELECT id FROM "User"
+      WHERE role IN ('ADMIN', 'ASSISTANT_ADMIN')
+      ORDER BY created_at ASC
+      LIMIT 1
+    `;
+    const adminRow = adminRows[0] as { id?: unknown } | undefined;
+    const adminId = adminRow?.id != null ? String(adminRow.id) : null;
+    if (!adminId) return;
+
+    await sql`
+      UPDATE "Course" c
+      SET created_by_id = ${adminId}, updated_at = NOW()
+      WHERE c.assigned_teacher_id IS NOT NULL
+        AND c.created_by_id IN (SELECT id FROM "User" WHERE role = 'TEACHER')
+    `;
+
+    await sql`
+      UPDATE "Course" c
+      SET
+        assigned_teacher_id = c.created_by_id,
+        created_by_id = ${adminId},
+        updated_at = NOW()
+      WHERE c.assigned_teacher_id IS NULL
+        AND c.created_by_id IN (SELECT id FROM "User" WHERE role = 'TEACHER')
+        AND (
+          c.category_id IS NULL
+          OR EXISTS (
+            SELECT 1 FROM "Category" cat
+            WHERE cat.id = c.category_id AND cat.created_by_id IS NULL
+          )
+        )
+    `;
+  } catch {
+    /* repair is best-effort */
+  }
+}
+
+export async function ensureCourseSchema(): Promise<void> {
+  await ensureCourseBilingualColumns();
+  await ensureCourseAssignedTeacherColumn();
+}
+
 export async function createCourse(data: {
   title: string;
   title_ar: string;
@@ -3910,21 +3983,35 @@ export async function createCourse(data: {
   max_quiz_attempts?: number | null;
   category_id?: string | null;
   accepts_homework?: boolean;
+  assigned_teacher_id?: string | null;
 }): Promise<Course> {
-  await ensureCourseBilingualColumns();
+  await ensureCourseSchema();
   const id = generateId();
   const catId = data.category_id ?? null;
   const acceptsHomework = data.accepts_homework ?? false;
+  const assignedTeacherId = data.assigned_teacher_id ?? null;
   let rows: Record<string, unknown>[];
   try {
     rows = await sql`
-      INSERT INTO "Course" (id, title, title_ar, slug, description, description_en, short_desc, short_desc_en, image_url, price, is_published, created_by_id, max_quiz_attempts, category_id, accepts_homework)
-      VALUES (${id}, ${data.title}, ${data.title_ar}, ${data.slug}, ${data.description}, ${data.description_en ?? null}, ${data.short_desc ?? null}, ${data.short_desc_en ?? null}, ${data.image_url ?? null}, ${data.price}, ${data.is_published}, ${data.created_by_id}, ${data.max_quiz_attempts ?? null}, ${catId}, ${acceptsHomework})
+      INSERT INTO "Course" (id, title, title_ar, slug, description, description_en, short_desc, short_desc_en, image_url, price, is_published, created_by_id, assigned_teacher_id, max_quiz_attempts, category_id, accepts_homework)
+      VALUES (${id}, ${data.title}, ${data.title_ar}, ${data.slug}, ${data.description}, ${data.description_en ?? null}, ${data.short_desc ?? null}, ${data.short_desc_en ?? null}, ${data.image_url ?? null}, ${data.price}, ${data.is_published}, ${data.created_by_id}, ${assignedTeacherId}, ${data.max_quiz_attempts ?? null}, ${catId}, ${acceptsHomework})
       RETURNING *
     `;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes("description_en") || msg.includes("short_desc_en")) {
+    if (msg.includes("assigned_teacher_id")) {
+      rows = await sql`
+        INSERT INTO "Course" (id, title, title_ar, slug, description, description_en, short_desc, short_desc_en, image_url, price, is_published, created_by_id, max_quiz_attempts, category_id, accepts_homework)
+        VALUES (${id}, ${data.title}, ${data.title_ar}, ${data.slug}, ${data.description}, ${data.description_en ?? null}, ${data.short_desc ?? null}, ${data.short_desc_en ?? null}, ${data.image_url ?? null}, ${data.price}, ${data.is_published}, ${data.created_by_id}, ${data.max_quiz_attempts ?? null}, ${catId}, ${acceptsHomework})
+        RETURNING *
+      `;
+      if (assignedTeacherId) {
+        await ensureCourseAssignedTeacherColumn();
+        await sql`UPDATE "Course" SET assigned_teacher_id = ${assignedTeacherId} WHERE id = ${id}`;
+        const updated = await sql`SELECT * FROM "Course" WHERE id = ${id} LIMIT 1`;
+        rows = updated as Record<string, unknown>[];
+      }
+    } else if (msg.includes("description_en") || msg.includes("short_desc_en")) {
       rows = await sql`
         INSERT INTO "Course" (id, title, title_ar, slug, description, description_en, short_desc, short_desc_en, image_url, price, is_published, created_by_id, max_quiz_attempts, category_id, accepts_homework)
         VALUES (${id}, ${data.title}, ${data.title_ar}, ${data.slug}, ${data.description}, ${data.description_en ?? null}, ${data.short_desc ?? null}, ${data.short_desc_en ?? null}, ${data.image_url ?? null}, ${data.price}, ${data.is_published}, ${data.created_by_id}, ${data.max_quiz_attempts ?? null}, ${catId}, ${acceptsHomework})
@@ -3973,9 +4060,10 @@ export async function updateCourse(
     category_id?: string | null;
     accepts_homework?: boolean;
     created_by_id?: string;
+    assigned_teacher_id?: string | null;
   }
 ): Promise<void> {
-  await ensureCourseBilingualColumns();
+  await ensureCourseSchema();
   if (data.title !== undefined) await sql`UPDATE "Course" SET title = ${data.title}, updated_at = NOW() WHERE id = ${id}`;
   if (data.title_ar !== undefined) await sql`UPDATE "Course" SET title_ar = ${data.title_ar}, updated_at = NOW() WHERE id = ${id}`;
   if (data.description !== undefined) await sql`UPDATE "Course" SET description = ${data.description}, updated_at = NOW() WHERE id = ${id}`;
@@ -4000,6 +4088,10 @@ export async function updateCourse(
   if (data.created_by_id !== undefined) {
     await sql`UPDATE "Course" SET created_by_id = ${data.created_by_id}, updated_at = NOW() WHERE id = ${id}`;
     await syncCourseLegacyColumns(id, { created_by_id: data.created_by_id });
+  }
+  if (data.assigned_teacher_id !== undefined) {
+    await ensureCourseAssignedTeacherColumn();
+    await sql`UPDATE "Course" SET assigned_teacher_id = ${data.assigned_teacher_id}, updated_at = NOW() WHERE id = ${id}`;
   }
 }
 
@@ -5199,6 +5291,29 @@ export async function getCourseCreatedById(courseId: string): Promise<string | n
   return createdBy != null ? String(createdBy) : null;
 }
 
+export async function getCourseAssignedTeacherId(courseId: string): Promise<string | null> {
+  await ensureCourseAssignedTeacherColumn();
+  const rows = await sql`SELECT assigned_teacher_id FROM "Course" WHERE id = ${courseId} LIMIT 1`;
+  const row = rows[0] as { assigned_teacher_id?: unknown } | undefined;
+  if (!row?.assigned_teacher_id) return null;
+  return String(row.assigned_teacher_id);
+}
+
+export async function getCourseManageIds(
+  courseId: string,
+): Promise<{ createdById: string | null; assignedTeacherId: string | null }> {
+  await ensureCourseAssignedTeacherColumn();
+  const rows = await sql`SELECT created_by_id, assigned_teacher_id, "userId" FROM "Course" WHERE id = ${courseId} LIMIT 1`;
+  const row = rows[0] as Record<string, unknown> | undefined;
+  if (!row) return { createdById: null, assignedTeacherId: null };
+  const createdBy = row.created_by_id ?? row.userId;
+  return {
+    createdById: createdBy != null ? String(createdBy) : null,
+    assignedTeacherId:
+      row.assigned_teacher_id != null ? String(row.assigned_teacher_id) : null,
+  };
+}
+
 /** Replace linked courses for a quiz (quiz-centric view). Owner course is always excluded. */
 export async function syncQuizLinkedCourses(quizId: string, linkedCourseIds: string[]): Promise<void> {
   await ensureQuizFeaturesSchema();
@@ -5364,6 +5479,7 @@ export async function listActivationCodesForTeacher(
   teacherId: string,
   courseId?: string | null
 ): Promise<ActivationCodeWithCourse[]> {
+  await ensureCourseAssignedTeacherColumn();
   const cid = courseId?.trim() || null;
   const rows = cid
     ? await sql`
@@ -5371,7 +5487,7 @@ export async function listActivationCodesForTeacher(
                (SELECT COUNT(*)::int FROM "ActivationCodeLesson" acl WHERE acl.activation_code_id = ac.id) as lesson_count,
                (SELECT COUNT(*)::int FROM "ActivationCodeQuiz" acq WHERE acq.activation_code_id = ac.id) as quiz_count
         FROM "ActivationCode" ac
-        JOIN "Course" c ON c.id = ac.course_id AND c.created_by_id = ${teacherId}
+        JOIN "Course" c ON c.id = ac.course_id AND (c.created_by_id = ${teacherId} OR c.assigned_teacher_id = ${teacherId})
         WHERE ac.course_id = ${cid}
         ORDER BY ac.created_at DESC
       `
@@ -5380,7 +5496,7 @@ export async function listActivationCodesForTeacher(
                (SELECT COUNT(*)::int FROM "ActivationCodeLesson" acl WHERE acl.activation_code_id = ac.id) as lesson_count,
                (SELECT COUNT(*)::int FROM "ActivationCodeQuiz" acq WHERE acq.activation_code_id = ac.id) as quiz_count
         FROM "ActivationCode" ac
-        JOIN "Course" c ON c.id = ac.course_id AND c.created_by_id = ${teacherId}
+        JOIN "Course" c ON c.id = ac.course_id AND (c.created_by_id = ${teacherId} OR c.assigned_teacher_id = ${teacherId})
         ORDER BY ac.created_at DESC
       `;
   return (rows as Record<string, unknown>[]).map((r) => rowToCamel(r) as ActivationCodeWithCourse);
@@ -5832,6 +5948,7 @@ export async function listHomeworkSubmissionsForTeacher(
   studentNameSearch?: string | null,
 ): Promise<HomeworkSubmissionWithDetails[]> {
   await ensureHomeworkSubmissionSchema();
+  await ensureCourseAssignedTeacherColumn();
   const search = studentNameSearch?.trim();
   const likePattern = search ? "%" + search + "%" : null;
   if (likePattern) {
@@ -5839,7 +5956,7 @@ export async function listHomeworkSubmissionsForTeacher(
       SELECT hs.*, c.title as course_title, c.title_ar as course_title_ar, u.name as user_name,
              l.title as lesson_title, l.title_ar as lesson_title_ar
       FROM "HomeworkSubmission" hs
-      JOIN "Course" c ON c.id = hs.course_id AND c.created_by_id = ${teacherId}
+      JOIN "Course" c ON c.id = hs.course_id AND (c.created_by_id = ${teacherId} OR c.assigned_teacher_id = ${teacherId})
       JOIN "User" u ON u.id = hs.user_id
       LEFT JOIN "Lesson" l ON l.id = hs.lesson_id
       WHERE u.name ILIKE ${likePattern}
@@ -5851,7 +5968,7 @@ export async function listHomeworkSubmissionsForTeacher(
     SELECT hs.*, c.title as course_title, c.title_ar as course_title_ar, u.name as user_name,
            l.title as lesson_title, l.title_ar as lesson_title_ar
     FROM "HomeworkSubmission" hs
-    JOIN "Course" c ON c.id = hs.course_id AND c.created_by_id = ${teacherId}
+    JOIN "Course" c ON c.id = hs.course_id AND (c.created_by_id = ${teacherId} OR c.assigned_teacher_id = ${teacherId})
     JOIN "User" u ON u.id = hs.user_id
     LEFT JOIN "Lesson" l ON l.id = hs.lesson_id
     ORDER BY hs.created_at DESC
@@ -5864,13 +5981,14 @@ export async function deleteHomeworkSubmissionsByIdsForTeacher(
   ids: string[],
 ): Promise<number> {
   await ensureHomeworkSubmissionSchema();
+  await ensureCourseAssignedTeacherColumn();
   if (ids.length === 0) return 0;
   let n = 0;
   for (const id of ids) {
     const rows = await sql`
       DELETE FROM "HomeworkSubmission" hs
       USING "Course" c
-      WHERE hs.id = ${id} AND hs.course_id = c.id AND c.created_by_id = ${teacherId}
+      WHERE hs.id = ${id} AND hs.course_id = c.id AND (c.created_by_id = ${teacherId} OR c.assigned_teacher_id = ${teacherId})
       RETURNING hs.id
     `;
     n += rows.length;
@@ -6211,6 +6329,7 @@ export async function getQuizAttemptsForTeacher(teacherId: string): Promise<
     createdAt: Date;
   }>
 > {
+  await ensureCourseAssignedTeacherColumn();
   const rows = await sql`
     SELECT u.id as user_id, u.name as user_name, u.email as user_email,
            qa.quiz_id, q.title as quiz_title, c.id as course_id, c.title as course_title,
@@ -6218,7 +6337,7 @@ export async function getQuizAttemptsForTeacher(teacherId: string): Promise<
     FROM "QuizAttempt" qa
     JOIN "User" u ON u.id = qa.user_id
     JOIN "Quiz" q ON q.id = qa.quiz_id
-    JOIN "Course" c ON c.id = q.course_id AND c.created_by_id = ${teacherId}
+    JOIN "Course" c ON c.id = q.course_id AND (c.created_by_id = ${teacherId} OR c.assigned_teacher_id = ${teacherId})
     ORDER BY qa.created_at DESC
   `;
   return (rows as Record<string, unknown>[]).map((r) => ({
@@ -6266,11 +6385,12 @@ export async function getTotalPlatformEarnings(): Promise<number> {
 }
 
 export async function getTotalEarningsForTeacher(teacherId: string): Promise<number> {
+  await ensureCourseAssignedTeacherColumn();
   try {
     const rows = await sql`
       SELECT COALESCE(SUM(p.amount), 0)::float as total
       FROM "Payment" p
-      INNER JOIN "Course" c ON c.id = p.course_id AND c.created_by_id = ${teacherId}
+      INNER JOIN "Course" c ON c.id = p.course_id AND (c.created_by_id = ${teacherId} OR c.assigned_teacher_id = ${teacherId})
     `;
     return Number((rows[0] as { total: number })?.total ?? 0);
   } catch {
@@ -6312,10 +6432,11 @@ export async function getLiveStreamsAll(): Promise<(LiveStream & { course?: { id
 export async function getLiveStreamsForTeacher(
   teacherId: string,
 ): Promise<(LiveStream & { course?: { id: string; title: string; slug: string } })[]> {
+  await ensureCourseAssignedTeacherColumn();
   const rows = await sql`
     SELECT ls.*, c.id as c_id, c.title as c_title, c.slug as c_slug
     FROM "LiveStream" ls
-    INNER JOIN "Course" c ON c.id = ls.course_id AND c.created_by_id = ${teacherId}
+    INNER JOIN "Course" c ON c.id = ls.course_id AND (c.created_by_id = ${teacherId} OR c.assigned_teacher_id = ${teacherId})
     ORDER BY ls.scheduled_at DESC
   `;
   return (rows as Record<string, unknown>[]).map((r) => {
@@ -6407,6 +6528,7 @@ export async function deleteTeacherUser(userId: string): Promise<void> {
 
 /** طلاب لديهم تسجيل في أي كورس أنشأه المدرس */
 export async function getStudentsEnrolledInTeacherCourses(teacherId: string): Promise<User[]> {
+  await ensureCourseAssignedTeacherColumn();
   if ((await detectSchemaMode(sql)) === "legacy") {
     const rows = await sql`
       SELECT DISTINCT u.*
@@ -6422,7 +6544,7 @@ export async function getStudentsEnrolledInTeacherCourses(teacherId: string): Pr
     SELECT DISTINCT u.*
     FROM "User" u
     INNER JOIN "Enrollment" e ON e.user_id = u.id
-    INNER JOIN "Course" c ON c.id = e.course_id AND c.created_by_id = ${teacherId}
+    INNER JOIN "Course" c ON c.id = e.course_id AND (c.created_by_id = ${teacherId} OR c.assigned_teacher_id = ${teacherId})
     WHERE u.role = 'STUDENT'
     ORDER BY u.name ASC
   `;
