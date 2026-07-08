@@ -3,7 +3,10 @@ import {
   createQuiz,
   createQuestion,
   createQuestionOption,
-  deleteOwnedQuizzesByCourseId,
+  updateQuiz,
+  deleteQuizById,
+  deleteQuestionsByQuizId,
+  getOwnedQuizIdsForCourse,
   syncQuizCourseAssignments,
   sql,
 } from "./db";
@@ -22,8 +25,10 @@ export type ParentQuizRef =
   | { type: "linked"; quizId: string };
 
 export type CourseQuizInput = {
+  id?: string;
   title: string;
   timeLimitMinutes?: number | null;
+  maxAttempts?: number | null;
   quizType?: QuizType;
   parentQuizRef?: ParentQuizRef | null;
   questions: QuestionInput[];
@@ -68,11 +73,13 @@ async function createQuizQuestions(
       options: legacy ? optionRows : undefined,
     });
     if (!legacy && optionRows.length > 0) {
-      for (const opt of optionRows) {
+      for (let oi = 0; oi < optionRows.length; oi++) {
+        const opt = optionRows[oi];
         await createQuestionOption({
           question_id: question.id,
           text: opt.text,
           is_correct: opt.is_correct,
+          position: oi + 1,
         });
       }
     }
@@ -88,11 +95,8 @@ export async function saveCourseQuizzes(params: {
 }): Promise<void> {
   const { courseId, lessonsCount, quizzes, contentOrder, replaceOwned = false } = params;
   const legacy = (await detectSchemaMode(sql)) === "legacy";
-
-  if (replaceOwned) {
-    await deleteOwnedQuizzesByCourseId(courseId);
-  }
-
+  const existingQuizIds = replaceOwned ? new Set(await getOwnedQuizIdsForCourse(courseId)) : new Set<string>();
+  const keptQuizIds = new Set<string>();
   const ownedQuizIds: string[] = [];
   const pendingParentUpdates: Array<{ quizId: string; parentQuizRef: ParentQuizRef }> = [];
 
@@ -103,25 +107,51 @@ export async function saveCourseQuizzes(params: {
       typeof mins === "number" && Number.isFinite(mins) && mins >= 1 ? mins : null;
     const order = contentOrder.findIndex((e) => e.type === "quiz" && e.index === qi);
     const orderVal = order >= 0 ? order : lessonsCount + qi;
-    const quizType = q.quizType === "REMEDIAL" ? "REMEDIAL" : "NORMAL";
+    const quizType: QuizType = q.quizType === "REMEDIAL" ? "REMEDIAL" : "NORMAL";
     const parentFromLinked =
       q.parentQuizRef?.type === "linked" ? resolveParentQuizId(q.parentQuizRef, ownedQuizIds) : null;
-
-    const quiz = await createQuiz({
-      course_id: courseId,
+    const quizId = q.id?.trim();
+    const quizPayload = {
       title: q.title?.trim() || `اختبار ${qi + 1}`,
       order: orderVal,
       time_limit_minutes: timeLimitMinutes,
       quiz_type: quizType,
       parent_quiz_id: parentFromLinked,
-    });
-    ownedQuizIds.push(quiz.id);
+      max_attempts:
+        typeof q.maxAttempts === "number" && Number.isFinite(q.maxAttempts) && q.maxAttempts >= 1
+          ? Math.floor(q.maxAttempts)
+          : null,
+    };
 
-    if (quizType === "REMEDIAL" && q.parentQuizRef?.type === "owned") {
-      pendingParentUpdates.push({ quizId: quiz.id, parentQuizRef: q.parentQuizRef });
+    let activeQuizId: string;
+    if (replaceOwned && quizId && existingQuizIds.has(quizId)) {
+      await updateQuiz(quizId, quizPayload);
+      await deleteQuestionsByQuizId(quizId);
+      await createQuizQuestions(quizId, q.questions ?? [], legacy);
+      activeQuizId = quizId;
+    } else {
+      const quiz = await createQuiz({
+        course_id: courseId,
+        ...quizPayload,
+      });
+      activeQuizId = quiz.id;
+      await createQuizQuestions(activeQuizId, q.questions ?? [], legacy);
     }
 
-    await createQuizQuestions(quiz.id, q.questions ?? [], legacy);
+    ownedQuizIds.push(activeQuizId);
+    keptQuizIds.add(activeQuizId);
+
+    if (quizType === "REMEDIAL" && q.parentQuizRef?.type === "owned") {
+      pendingParentUpdates.push({ quizId: activeQuizId, parentQuizRef: q.parentQuizRef });
+    }
+  }
+
+  if (replaceOwned) {
+    for (const id of existingQuizIds) {
+      if (!keptQuizIds.has(id)) {
+        await deleteQuizById(id);
+      }
+    }
   }
 
   for (const pending of pendingParentUpdates) {

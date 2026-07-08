@@ -20,8 +20,12 @@ import { QuestionImageField } from "../../QuestionImageField";
 export type { ContentOrderEntry };
 
 type CategoryOption = { id: string; name: string; nameAr?: string | null };
+<<<<<<< HEAD
 type TeacherOption = { id: string; name: string | null; email: string | null };
 type LessonRow = { title: string; videoUrl: string; content: string; pdfUrl: string; acceptsHomework: boolean };
+=======
+type LessonRow = { id?: string; title: string; videoUrl: string; content: string; pdfUrl: string; acceptsHomework: boolean };
+>>>>>>> 0ea2bb98d9779d1b7e9a4c3a0fb5df7c48c00e0c
 type QuestionOptionRow = { text: string; isCorrect: boolean };
 type QuestionRow = { type: "MULTIPLE_CHOICE" | "TRUE_FALSE"; questionText: string; imageUrl: string; options: QuestionOptionRow[] };
 
@@ -38,6 +42,7 @@ type InitialQuizRow = {
   quizType?: "NORMAL" | "REMEDIAL";
   parentQuizId?: string | null;
   timeLimitMinutes?: number | null;
+  maxAttempts?: number | null;
   questions: InitialQuestionRow[];
 };
 type InitialLinkedQuizRow = {
@@ -73,6 +78,7 @@ const defaultLesson: LessonRow = { title: "", videoUrl: "", content: "", pdfUrl:
 const defaultQuiz: QuizRow = {
   title: "",
   timeLimitMinutes: "",
+  maxAttempts: "",
   quizType: "NORMAL",
   parentQuizRef: null,
   questions: [{ type: "MULTIPLE_CHOICE", questionText: "", imageUrl: "", options: [{ text: "", isCorrect: false }] }],
@@ -110,7 +116,6 @@ export function EditCourseForm({
     imageUrl: initialData.imageUrl,
     price: initialData.price,
     isPublished: initialData.isPublished,
-    maxQuizAttempts: initialData.maxQuizAttempts != null ? String(initialData.maxQuizAttempts) : "",
     categoryId: initialData.categoryId ?? "",
     categoryNameAr: "",
     categoryNameEn: "",
@@ -120,7 +125,11 @@ export function EditCourseForm({
       ? initialData.lessons.map((l) => {
           const r = l as Record<string, unknown>;
           return {
-            ...l,
+            id: r.id != null ? String(r.id) : undefined,
+            title: String(r.title ?? ""),
+            videoUrl: String(r.videoUrl ?? r.video_url ?? ""),
+            content: String(r.content ?? ""),
+            pdfUrl: String(r.pdfUrl ?? r.pdf_url ?? ""),
             acceptsHomework: Boolean(r.acceptsHomework ?? r.accepts_homework ?? false),
           };
         })
@@ -162,6 +171,7 @@ export function EditCourseForm({
           id: q.id,
           title: q.title,
           timeLimitMinutes: q.timeLimitMinutes != null ? String(q.timeLimitMinutes) : "",
+          maxAttempts: q.maxAttempts != null ? String(q.maxAttempts) : "",
           quizType: q.quizType === "REMEDIAL" ? "REMEDIAL" : "NORMAL",
           parentQuizRef: resolveParentQuizRefFromId(
             q.parentQuizId,
@@ -325,6 +335,9 @@ export function EditCourseForm({
   function updateQuizTimeLimit(qi: number, value: string) {
     setQuizzes((q) => q.map((x, i) => (i === qi ? { ...x, timeLimitMinutes: value } : x)));
   }
+  function updateQuizMaxAttempts(qi: number, value: string) {
+    setQuizzes((q) => q.map((x, i) => (i === qi ? { ...x, maxAttempts: value } : x)));
+  }
   function addQuestion(qi: number) {
     setQuizzes((q) =>
       q.map((x, i) =>
@@ -427,12 +440,17 @@ export function EditCourseForm({
       .filter((q) => q.title.trim())
       .filter((q) => q.questions.some((qt) => qt.questionText.trim()) && q.questions.filter((qt) => qt.questionText.trim()).length > 0)
       .map((q) => ({
+        id: q.id,
         title: q.title.trim(),
         quizType: q.quizType,
         parentQuizRef: q.quizType === "REMEDIAL" ? q.parentQuizRef : null,
         timeLimitMinutes: (() => {
           const n = parseInt(q.timeLimitMinutes, 10);
           return Number.isFinite(n) && n >= 1 ? n : undefined;
+        })(),
+        maxAttempts: (() => {
+          const n = parseInt(q.maxAttempts, 10);
+          return Number.isFinite(n) && n >= 1 ? n : null;
         })(),
         questions: q.questions
           .filter((qt) => qt.questionText.trim())
@@ -473,12 +491,16 @@ export function EditCourseForm({
       imageUrl: form.imageUrl.trim() || undefined,
       price: form.price ? parseFloat(form.price) : 0,
       isPublished: form.isPublished,
+<<<<<<< HEAD
       maxQuizAttempts: form.maxQuizAttempts.trim() ? parseInt(form.maxQuizAttempts, 10) : null,
       ...(isAdmin && teacherId.trim() ? { teacherId: teacherId.trim() } : {}),
+=======
+>>>>>>> 0ea2bb98d9779d1b7e9a4c3a0fb5df7c48c00e0c
       ...(form.categoryNameAr.trim()
         ? { categoryNameAr: form.categoryNameAr.trim() }
         : form.categoryId ? { categoryId: form.categoryId } : { categoryId: null }),
       lessons: validLessons.map((l) => ({
+        id: l.id?.trim() || undefined,
         title: l.title.trim(),
         videoUrl: l.videoUrl.trim() || undefined,
         content: l.content.trim() || undefined,
@@ -640,11 +662,6 @@ export function EditCourseForm({
             <input type="number" step="0.01" min="0" value={form.price} onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))} className="mt-1 w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-[var(--color-foreground)]">{t(`${Cf}.quizAttemptsHint`)}</label>
-            <input type="number" min="1" placeholder={t(`${Cf}.unlimitedPlaceholderLine`)} value={form.maxQuizAttempts} onChange={(e) => setForm((f) => ({ ...f, maxQuizAttempts: e.target.value }))} className="mt-1 w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2" />
-            <p className="mt-1 text-xs text-[var(--color-muted)]">{t(`${Cf}.quizAttemptsExplanation`)}</p>
-          </div>
-          <div>
             <label className="block text-sm font-medium text-[var(--color-foreground)]">{t(`${Cf}.titleArRequired`)}</label>
             <input type="text" value={form.titleAr} onChange={(e) => setForm((f) => ({ ...f, titleAr: e.target.value }))} className="mt-1 w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2" required />
           </div>
@@ -763,17 +780,31 @@ export function EditCourseForm({
                 </div>
               )}
             </div>
-            <div className="mb-3">
-              <label className="block text-sm font-medium text-[var(--color-foreground)]">{t(`${Cf}.quizDurationMinutes`)}</label>
-              <input
-                type="number"
-                min="1"
-                placeholder={t(`${Cf}.openTimePlaceholderLine`)}
-                value={quiz.timeLimitMinutes}
-                onChange={(e) => updateQuizTimeLimit(qi, e.target.value)}
-                className="mt-1 w-full max-w-xs rounded-[var(--radius-btn)] border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2"
-              />
-              <p className="mt-1 text-xs text-[var(--color-muted)]">{t(`${Cf}.quizTimeHelp`)}</p>
+            <div className="mb-3 grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="block text-sm font-medium text-[var(--color-foreground)]">{t(`${Cf}.quizDurationMinutes`)}</label>
+                <input
+                  type="number"
+                  min="1"
+                  placeholder={t(`${Cf}.openTimePlaceholderLine`)}
+                  value={quiz.timeLimitMinutes}
+                  onChange={(e) => updateQuizTimeLimit(qi, e.target.value)}
+                  className="mt-1 w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2"
+                />
+                <p className="mt-1 text-xs text-[var(--color-muted)]">{t(`${Cf}.quizTimeHelp`)}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-[var(--color-foreground)]">{t(`${Cf}.quizAttemptsHint`)}</label>
+                <input
+                  type="number"
+                  min="1"
+                  placeholder={t(`${Cf}.unlimitedPlaceholderLine`)}
+                  value={quiz.maxAttempts}
+                  onChange={(e) => updateQuizMaxAttempts(qi, e.target.value)}
+                  className="mt-1 w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2"
+                />
+                <p className="mt-1 text-xs text-[var(--color-muted)]">{t(`${Cf}.quizAttemptsPerQuizExplanation`)}</p>
+              </div>
             </div>
             {quiz.questions.map((q, qti) => (
               <div key={qti} className="mb-4 rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-3">

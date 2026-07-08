@@ -16,6 +16,7 @@ export type QuizRow = {
   id?: string;
   title: string;
   timeLimitMinutes: string;
+  maxAttempts: string;
   quizType: "NORMAL" | "REMEDIAL";
   parentQuizRef: ParentQuizRef | null;
   questions: QuestionRow[];

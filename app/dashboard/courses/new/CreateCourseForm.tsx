@@ -22,6 +22,7 @@ type LessonRow = { title: string; videoUrl: string; content: string; pdfUrl: str
 const defaultQuiz: QuizRow = {
   title: "",
   timeLimitMinutes: "",
+  maxAttempts: "",
   quizType: "NORMAL",
   parentQuizRef: null,
   questions: [{ type: "MULTIPLE_CHOICE", questionText: "", imageUrl: "", options: [{ text: "", isCorrect: false }] }],
@@ -50,7 +51,6 @@ export function CreateCourseForm({
     shortDescEn: "",
     imageUrl: "",
     price: "",
-    maxQuizAttempts: "",
     categoryId: "",
     categoryNameAr: "",
     categoryNameEn: "",
@@ -151,6 +151,9 @@ export function CreateCourseForm({
   }
   function updateQuizTimeLimit(qi: number, value: string) {
     setQuizzes((q) => q.map((x, i) => (i === qi ? { ...x, timeLimitMinutes: value } : x)));
+  }
+  function updateQuizMaxAttempts(qi: number, value: string) {
+    setQuizzes((q) => q.map((x, i) => (i === qi ? { ...x, maxAttempts: value } : x)));
   }
   function addQuestion(qi: number) {
     setQuizzes((q) =>
@@ -269,6 +272,10 @@ export function CreateCourseForm({
           const n = parseInt(q.timeLimitMinutes, 10);
           return Number.isFinite(n) && n >= 1 ? n : undefined;
         })(),
+        maxAttempts: (() => {
+          const n = parseInt(q.maxAttempts, 10);
+          return Number.isFinite(n) && n >= 1 ? n : null;
+        })(),
         questions: q.questions
           .filter((qt) => qt.questionText.trim())
           .map((qt) => ({
@@ -305,8 +312,11 @@ export function CreateCourseForm({
       shortDescAr: form.shortDescAr.trim() || undefined,
       imageUrl: form.imageUrl.trim() || undefined,
       price: form.price ? parseFloat(form.price) : 0,
+<<<<<<< HEAD
       maxQuizAttempts: form.maxQuizAttempts.trim() ? parseInt(form.maxQuizAttempts, 10) : null,
       ...(isAdmin && teacherId.trim() ? { teacherId: teacherId.trim() } : {}),
+=======
+>>>>>>> 0ea2bb98d9779d1b7e9a4c3a0fb5df7c48c00e0c
       ...(form.categoryNameAr.trim()
         ? { categoryNameAr: form.categoryNameAr.trim() }
         : form.categoryId ? { categoryId: form.categoryId } : {}),
@@ -628,18 +638,6 @@ export function CreateCourseForm({
       <section className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
         <h3 className="mb-4 text-lg font-semibold text-[var(--color-foreground)]">{t(`${Cf}.quizzesHeading`)}</h3>
         <p className="mb-4 text-sm text-[var(--color-muted)]">{t(`${Cf}.quizzesIntro`)}</p>
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-[var(--color-foreground)]">{t(`${Cf}.quizAttemptsHint`)}</label>
-          <input
-            type="number"
-            min="1"
-            placeholder={t(`${Cf}.unlimitedPlaceholderLine`)}
-            value={form.maxQuizAttempts}
-            onChange={(e) => setForm((f) => ({ ...f, maxQuizAttempts: e.target.value }))}
-            className="mt-1 w-full max-w-xs rounded-[var(--radius-btn)] border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2"
-          />
-          <p className="mt-1 text-xs text-[var(--color-muted)]">{t(`${Cf}.quizAttemptsExplanation`)}</p>
-        </div>
         {quizzes.map((quiz, qi) => (
           <div key={qi} className="mb-6 rounded-[var(--radius-btn)] border border-[var(--color-border)] bg-[var(--color-background)] p-4">
             <div className="mb-3 flex items-center justify-between">
@@ -684,17 +682,31 @@ export function CreateCourseForm({
                 </div>
               )}
             </div>
-            <div className="mb-3">
-              <label className="block text-sm font-medium text-[var(--color-foreground)]">{t(`${Cf}.quizDurationMinutes`)}</label>
-              <input
-                type="number"
-                min="1"
-                placeholder={t(`${Cf}.openTimePlaceholderLine`)}
-                value={quiz.timeLimitMinutes}
-                onChange={(e) => updateQuizTimeLimit(qi, e.target.value)}
-                className="mt-1 w-full max-w-xs rounded-[var(--radius-btn)] border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2"
-              />
-              <p className="mt-1 text-xs text-[var(--color-muted)]">{t(`${Cf}.quizTimeHelp`)}</p>
+            <div className="mb-3 grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="block text-sm font-medium text-[var(--color-foreground)]">{t(`${Cf}.quizDurationMinutes`)}</label>
+                <input
+                  type="number"
+                  min="1"
+                  placeholder={t(`${Cf}.openTimePlaceholderLine`)}
+                  value={quiz.timeLimitMinutes}
+                  onChange={(e) => updateQuizTimeLimit(qi, e.target.value)}
+                  className="mt-1 w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2"
+                />
+                <p className="mt-1 text-xs text-[var(--color-muted)]">{t(`${Cf}.quizTimeHelp`)}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-[var(--color-foreground)]">{t(`${Cf}.quizAttemptsHint`)}</label>
+                <input
+                  type="number"
+                  min="1"
+                  placeholder={t(`${Cf}.unlimitedPlaceholderLine`)}
+                  value={quiz.maxAttempts}
+                  onChange={(e) => updateQuizMaxAttempts(qi, e.target.value)}
+                  className="mt-1 w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2"
+                />
+                <p className="mt-1 text-xs text-[var(--color-muted)]">{t(`${Cf}.quizAttemptsPerQuizExplanation`)}</p>
+              </div>
             </div>
             {quiz.questions.map((q, qti) => (
               <div key={qti} className="mb-4 rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-3">

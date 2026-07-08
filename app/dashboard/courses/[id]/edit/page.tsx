@@ -85,6 +85,7 @@ export default async function EditCoursePage({ params }: Props) {
     lessons: data.lessons.map((l) => {
       const row = l as Record<string, unknown>;
       return {
+        id: String(row.id ?? ""),
         title: String(row.title ?? ""),
         videoUrl: String(row.videoUrl ?? row.video_url ?? ""),
         content: String(row.content ?? ""),
@@ -108,6 +109,12 @@ export default async function EditCoursePage({ params }: Props) {
         quizType: (row.quizType === "REMEDIAL" ? "REMEDIAL" : "NORMAL") as "NORMAL" | "REMEDIAL",
         parentQuizId: (row.parentQuizId ?? row.parent_quiz_id ?? null) as string | null,
         timeLimitMinutes: timeLimitMinutes != null && Number.isFinite(timeLimitMinutes) && timeLimitMinutes >= 1 ? timeLimitMinutes : null,
+        maxAttempts: (() => {
+          const raw = row.maxAttempts ?? row.max_attempts;
+          if (raw == null) return null;
+          const n = Number(raw);
+          return Number.isFinite(n) && n >= 1 ? n : null;
+        })(),
         questions: questions.map((qt) => ({
           type: (qt.type === "ESSAY" || qt.type === "TRUE_FALSE" ? qt.type : "MULTIPLE_CHOICE") as "MULTIPLE_CHOICE" | "ESSAY" | "TRUE_FALSE",
           questionText: String(qt.questionText ?? qt.question_text ?? ""),

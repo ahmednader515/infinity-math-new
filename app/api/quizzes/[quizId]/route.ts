@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import {
   getQuizById,
-  countQuizAttemptsByUserAndCourse,
+  countSubmittedQuizAttemptsByUserAndQuiz,
   createQuizAttempt,
   updateQuizAttemptById,
   canStudentAccessQuizInCourse,
@@ -13,8 +13,10 @@ import {
   hasFullCourseAccessAsStudent,
   getQuizProgressSets,
   getLatestQuizAttemptsMap,
+  getInProgressQuizAttemptId,
 } from "@/lib/db";
-import { QUIZ_PASS_PERCENT } from "@/lib/course-content";
+import { QUIZ_PASS_PERCENT, quizAttemptPassed } from "@/lib/course-content";
+import { parseQuizMaxAttempts } from "@/lib/quiz-attempts";
 import { getNextNavAfterQuizSubmit } from "@/lib/course-progression-server";
 
 /**
@@ -61,13 +63,15 @@ export async function GET(
       return NextResponse.json({ error: "غير مسجّل في هذه الدورة أو لا تملك صلاحية لهذا الاختبار" }, { status: 403 });
     }
 
-    const maxAttempts = result.course.max_quiz_attempts ?? result.course.maxQuizAttempts;
+    const maxAttempts = parseQuizMaxAttempts(result.quiz as Record<string, unknown>);
     let canAttempt = true;
     let attemptsUsed = 0;
-    if (session?.user?.id && typeof maxAttempts === "number" && maxAttempts > 0) {
+    let inProgressAttemptId: string | null = null;
+    if (session?.user?.id && maxAttempts != null) {
       if (isStaff || (await canStudentAccessQuizInCourse(session.user.id, quizId, courseId))) {
-        attemptsUsed = await countQuizAttemptsByUserAndCourse(session.user.id, courseId);
-        if (attemptsUsed >= maxAttempts) {
+        attemptsUsed = await countSubmittedQuizAttemptsByUserAndQuiz(session.user.id, quizId);
+        inProgressAttemptId = await getInProgressQuizAttemptId(session.user.id, quizId);
+        if (attemptsUsed >= maxAttempts && !inProgressAttemptId) {
           canAttempt = false;
         }
       }
@@ -106,24 +110,33 @@ export async function GET(
           isCorrect: o.isCorrect ?? o.is_correct,
         })),
       })),
-      maxQuizAttempts: typeof maxAttempts === "number" ? maxAttempts : null,
+      maxQuizAttempts: maxAttempts,
       attemptsUsed,
       canAttempt,
+      inProgressAttemptId,
       hasPassed: false as boolean,
+      hasSubmitted: false as boolean,
+      latestAttemptId: null as string | null,
       resultScore: null as number | null,
       resultTotal: null as number | null,
+      resultPercentage: null as number | null,
       nextContent: null as { href: string; label: string; type: "lesson" | "quiz" } | null,
     };
 
     if (session?.user?.id && !isStaff) {
-      const { passed } = await getQuizProgressSets(session.user.id, [quizId], QUIZ_PASS_PERCENT);
+      const { submitted, passed } = await getQuizProgressSets(session.user.id, [quizId], QUIZ_PASS_PERCENT);
       payload.hasPassed = passed.has(quizId);
-      if (payload.hasPassed) {
+      payload.hasSubmitted = submitted.has(quizId);
+      if (payload.hasSubmitted) {
         const latest = await getLatestQuizAttemptsMap(session.user.id, [quizId]);
         const att = latest.get(quizId);
         if (att) {
+          payload.latestAttemptId = att.id;
           payload.resultScore = att.score;
           payload.resultTotal = att.totalQuestions;
+          if (att.totalQuestions > 0) {
+            payload.resultPercentage = Math.round((att.score / att.totalQuestions) * 100);
+          }
         }
         const hasFull = await hasFullCourseAccessAsStudent(session.user.id, courseId);
         const courseContent = await getCourseWithContent(courseId);
@@ -145,7 +158,7 @@ export async function GET(
       }
     }
 
-    if (!canAttempt) {
+    if (!canAttempt && !payload.hasSubmitted) {
       return NextResponse.json(
         { error: "تم استنفاد عدد المحاولات المسموح بها لهذا الاختبار في الكورس.", ...payload },
         { status: 403 }
@@ -178,7 +191,13 @@ export async function POST(
       return NextResponse.json({ error: "معرّف الاختبار غير صالح" }, { status: 400 });
     }
 
-    let body: { score?: number; totalQuestions?: number; attemptId?: string | null; courseId?: string | null };
+    let body: {
+      score?: number;
+      totalQuestions?: number;
+      attemptId?: string | null;
+      courseId?: string | null;
+      answers?: Record<string, string>;
+    };
     try {
       body = await request.json();
     } catch {
@@ -190,6 +209,10 @@ export async function POST(
     if (totalQuestions < 1) {
       return NextResponse.json({ error: "عدد الأسئلة غير صالح" }, { status: 400 });
     }
+    const answersJson =
+      body.answers && typeof body.answers === "object" && !Array.isArray(body.answers)
+        ? JSON.stringify(body.answers)
+        : null;
 
     const viewingCourseId = body.courseId?.trim() || new URL(request.url).searchParams.get("courseId")?.trim() || null;
     const result = await getQuizById(quizId, viewingCourseId);
@@ -213,15 +236,19 @@ export async function POST(
       return NextResponse.json({ error: "غير مسجّل في هذه الدورة" }, { status: 403 });
     }
 
-    const maxAttempts = result.course.max_quiz_attempts ?? result.course.maxQuizAttempts;
-    if (typeof maxAttempts === "number" && maxAttempts > 0) {
-      const used = await countQuizAttemptsByUserAndCourse(session.user.id, courseId);
-      if (used >= maxAttempts) {
+    const maxAttempts = parseQuizMaxAttempts(result.quiz as Record<string, unknown>);
+    const attemptId = typeof body.attemptId === "string" && body.attemptId.trim() ? body.attemptId.trim() : null;
+    if (maxAttempts != null) {
+      const used = await countSubmittedQuizAttemptsByUserAndQuiz(session.user.id, quizId);
+      const inProgress = attemptId
+        ? attemptId
+        : await getInProgressQuizAttemptId(session.user.id, quizId);
+      if (used >= maxAttempts && !inProgress) {
         return NextResponse.json({ error: "تم استنفاد المحاولات" }, { status: 403 });
       }
     }
 
-    const attemptId = typeof body.attemptId === "string" && body.attemptId.trim() ? body.attemptId.trim() : null;
+    let savedAttemptId = attemptId;
     if (attemptId) {
       const ok = await updateQuizAttemptById({
         attemptId,
@@ -229,18 +256,38 @@ export async function POST(
         quizId,
         score,
         totalQuestions,
+        answersJson,
       });
       if (!ok) {
-        await createQuizAttempt(session.user.id, quizId, score, totalQuestions);
+        savedAttemptId = await createQuizAttempt(
+          session.user.id,
+          quizId,
+          score,
+          totalQuestions,
+          answersJson,
+        );
       }
     } else {
-      await createQuizAttempt(session.user.id, quizId, score, totalQuestions);
+      savedAttemptId = await createQuizAttempt(
+        session.user.id,
+        quizId,
+        score,
+        totalQuestions,
+        answersJson,
+      );
     }
 
-    const passed = (score / totalQuestions) * 100 >= QUIZ_PASS_PERCENT;
+    const passed = quizAttemptPassed(score, totalQuestions);
+    const percentage = Math.round((score / totalQuestions) * 100);
     let nextContent: { href: string; label: string; type: "lesson" | "quiz" } | null = null;
+    let attemptsUsed = 0;
+    let canRetry = true;
 
-    if (passed && !isStaff) {
+    if (!isStaff) {
+      if (maxAttempts != null) {
+        attemptsUsed = await countSubmittedQuizAttemptsByUserAndQuiz(session.user.id, quizId);
+        canRetry = attemptsUsed < maxAttempts;
+      }
       const hasFull = await hasFullCourseAccessAsStudent(session.user.id, courseId);
       const courseContent = await getCourseWithContent(courseId);
       if (courseContent?.course) {
@@ -260,10 +307,22 @@ export async function POST(
       }
     }
 
+    if (!savedAttemptId) {
+      const latest = await getLatestQuizAttemptsMap(session.user.id, [quizId]);
+      savedAttemptId = latest.get(quizId)?.id ?? null;
+    }
+
     return NextResponse.json({
       success: true,
       passed,
+      percentage,
+      score,
+      totalQuestions,
+      attemptId: savedAttemptId,
       nextContent,
+      canRetry,
+      attemptsUsed,
+      maxQuizAttempts: maxAttempts,
     });
   } catch (e) {
     console.error("API quizzes [quizId] POST:", e);

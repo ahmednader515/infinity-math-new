@@ -3,8 +3,9 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import {
   getQuizById,
-  countQuizAttemptsByUserAndCourse,
+  countSubmittedQuizAttemptsByUserAndQuiz,
   createQuizAttemptReturningId,
+  getInProgressQuizAttemptId,
   canStudentAccessQuizInCourse,
   isRemedialQuizUnlocked,
   quizBelongsToCourse,
@@ -15,6 +16,7 @@ import {
   isContentUnlockedInProgression,
   shouldApplySequentialProgression,
 } from "@/lib/course-progression-server";
+import { parseQuizMaxAttempts } from "@/lib/quiz-attempts";
 
 function resolveViewingCourseId(request: Request, body?: { courseId?: unknown }): string | null {
   const fromBody = body?.courseId != null ? String(body.courseId).trim() : "";
@@ -90,13 +92,17 @@ export async function POST(
       }
     }
 
-    const maxAttempts = result.course.max_quiz_attempts ?? result.course.maxQuizAttempts;
-    let attemptsUsed = 0;
-    if (typeof maxAttempts === "number" && maxAttempts > 0) {
-      attemptsUsed = await countQuizAttemptsByUserAndCourse(session.user.id, courseId);
+    const maxAttempts = parseQuizMaxAttempts(result.quiz as Record<string, unknown>);
+    if (maxAttempts != null) {
+      const attemptsUsed = await countSubmittedQuizAttemptsByUserAndQuiz(session.user.id, quizId);
       if (attemptsUsed >= maxAttempts) {
         return NextResponse.json({ error: "تم استنفاد المحاولات" }, { status: 403 });
       }
+    }
+
+    const existingAttemptId = await getInProgressQuizAttemptId(session.user.id, quizId);
+    if (existingAttemptId) {
+      return NextResponse.json({ success: true, attemptId: existingAttemptId, resumed: true });
     }
 
     const attemptId = await createQuizAttemptReturningId(session.user.id, quizId, 0, 0);

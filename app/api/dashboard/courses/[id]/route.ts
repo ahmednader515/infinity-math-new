@@ -7,13 +7,12 @@ import {
   getCourseForEdit,
   updateCourse,
   deleteCourse,
-  deleteLessonsByCourseId,
-  createLesson,
   findCategoryByNameForDashboard,
   createCategory,
   categoryIsManageableOnDashboard,
   assertAssignableTeacher,
 } from "@/lib/db";
+import { syncCourseLessons } from "@/lib/save-course-lessons";
 import {
   saveCourseQuizzes,
   type CourseContentOrderEntry,
@@ -21,7 +20,15 @@ import {
 } from "@/lib/save-course-quizzes";
 import { revalidatePublicCache, PUBLIC_CACHE_TAGS } from "@/lib/public-data-cache";
 
-type LessonInput = { title: string; titleAr?: string; videoUrl?: string; content?: string; pdfUrl?: string; acceptsHomework?: boolean };
+type LessonInput = {
+  id?: string;
+  title: string;
+  titleAr?: string;
+  videoUrl?: string;
+  content?: string;
+  pdfUrl?: string;
+  acceptsHomework?: boolean;
+};
 type ContentOrderEntry = CourseContentOrderEntry;
 
 /** تحديث دورة - للأدمن ومساعد الأدمن */
@@ -144,13 +151,12 @@ export async function PUT(
     image_url: body.imageUrl?.trim() || null,
     price: body.price ?? 0,
     is_published: body.isPublished ?? true,
-    max_quiz_attempts: body.maxQuizAttempts ?? null,
+    max_quiz_attempts: null,
     ...(categoryId !== undefined && { category_id: categoryId }),
     ...(body.acceptsHomework !== undefined && { accepts_homework: body.acceptsHomework }),
     ...(createdByUpdate !== undefined && { created_by_id: createdByUpdate }),
   });
 
-  await deleteLessonsByCourseId(id);
   const lessons = body.lessons ?? [];
   const quizzes = body.quizzes ?? [];
   const contentOrder: ContentOrderEntry[] =
@@ -160,23 +166,12 @@ export async function PUT(
       ...quizzes.map((_, i) => ({ type: "quiz" as const, index: i })),
     ] satisfies ContentOrderEntry[]);
 
-  for (let i = 0; i < lessons.length; i++) {
-    const le = lessons[i];
-    const lessonSlug = `${slug}-${i + 1}`.replace(/\s+/g, "-");
-    const order = contentOrder.findIndex((e) => e.type === "lesson" && e.index === i);
-    const orderVal = order >= 0 ? order : i;
-    await createLesson({
-      course_id: id,
-      title: le.title?.trim() || `حصة ${i + 1}`,
-      title_ar: le.titleAr?.trim() || null,
-      slug: lessonSlug,
-      content: le.content?.trim() || null,
-      video_url: le.videoUrl?.trim() || null,
-      pdf_url: le.pdfUrl?.trim() || null,
-      order: orderVal,
-      accepts_homework: !!le.acceptsHomework,
-    });
-  }
+  await syncCourseLessons({
+    courseId: id,
+    courseSlug: slug,
+    lessons,
+    contentOrder,
+  });
 
   await saveCourseQuizzes({
     courseId: id,
@@ -232,6 +227,7 @@ export async function GET(
     categoryId: (c as { categoryId?: string | null }).categoryId ?? null,
     teacherId: createdBy,
     lessons: data.lessons.map((l) => ({
+      id: String((l as { id?: string }).id ?? ""),
       title: l.title,
       titleAr: l.titleAr ?? l.title_ar,
       videoUrl: l.videoUrl ?? l.video_url,
@@ -245,7 +241,14 @@ export async function GET(
       quizType: (q as { quizType?: string }).quizType ?? "NORMAL",
       parentQuizId: (q as { parentQuizId?: string | null }).parentQuizId ?? null,
       timeLimitMinutes: (q as { timeLimitMinutes?: number | null }).timeLimitMinutes ?? null,
-      questions: (q.questions ?? []).map((qt) => ({
+        maxAttempts: (() => {
+          const raw = (q as { maxAttempts?: number | null; max_attempts?: number | null }).maxAttempts
+            ?? (q as { max_attempts?: number | null }).max_attempts;
+          if (raw == null) return null;
+          const n = Number(raw);
+          return Number.isFinite(n) && n >= 1 ? n : null;
+        })(),
+        questions: (q.questions ?? []).map((qt) => ({
         type: qt.type,
         questionText: qt.questionText ?? qt.question_text,
         options: (qt.options ?? []).map((o) => ({ text: o.text, isCorrect: o.isCorrect ?? o.is_correct })),

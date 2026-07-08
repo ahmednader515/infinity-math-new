@@ -39,7 +39,7 @@ type BuildProgressionInput = {
 /**
  * Build ordered content rows with lock/completed flags.
  * Normal quiz failed → slot shows remedial quiz until remedial is passed.
- * Quiz completion uses any passing submitted attempt (supports unlimited retries).
+ * Quiz slot completion uses first submitted attempt (unlocks next content for the student).
  */
 export function buildCourseProgressionState(input: BuildProgressionInput): CourseProgressionState {
   const {
@@ -92,7 +92,9 @@ export function buildCourseProgressionState(input: BuildProgressionInput): Cours
       isRemedial = true;
     }
 
-    const completed = normalPassed || remedialPassed;
+    const normalSubmitted = submittedQuizIds.has(normalId);
+    const remedialSubmitted = remedialId ? submittedQuizIds.has(remedialId) : false;
+    const completed = normalSubmitted || remedialSubmitted || normalPassed || remedialPassed;
 
     return {
       type: "quiz",

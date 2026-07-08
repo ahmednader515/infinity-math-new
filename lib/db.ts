@@ -4108,6 +4108,91 @@ export async function deleteLessonsByCourseId(courseId: string): Promise<void> {
   await sql`DELETE FROM "Lesson" WHERE course_id = ${courseId}`;
 }
 
+export async function getLessonIdsByCourseId(courseId: string): Promise<string[]> {
+  const legacy = (await detectSchemaMode(sql)) === "legacy";
+  const rows = legacy
+    ? await sql`SELECT id FROM "Chapter" WHERE "courseId" = ${courseId}`
+    : await sql`SELECT id FROM "Lesson" WHERE course_id = ${courseId}`;
+  return (rows as { id: string }[]).map((r) => String(r.id));
+}
+
+export async function updateLesson(
+  id: string,
+  data: {
+    title: string;
+    title_ar?: string | null;
+    slug: string;
+    content?: string | null;
+    video_url?: string | null;
+    pdf_url?: string | null;
+    order: number;
+    accepts_homework?: boolean;
+  },
+): Promise<void> {
+  const acceptsHomework = data.accepts_homework ?? false;
+  const legacy = (await detectSchemaMode(sql)) === "legacy";
+
+  if (legacy) {
+    await sql`
+      UPDATE "Chapter"
+      SET title = ${data.title},
+          description = ${data.content ?? null},
+          "videoUrl" = ${data.video_url ?? null},
+          "documentUrl" = ${data.pdf_url ?? null},
+          position = ${data.order},
+          "updatedAt" = NOW()
+      WHERE id = ${id}
+    `;
+    return;
+  }
+
+  try {
+    await sql`
+      UPDATE "Lesson"
+      SET title = ${data.title},
+          title_ar = ${data.title_ar ?? null},
+          slug = ${data.slug},
+          content = ${data.content ?? null},
+          video_url = ${data.video_url ?? null},
+          pdf_url = ${data.pdf_url ?? null},
+          "order" = ${data.order},
+          accepts_homework = ${acceptsHomework},
+          updated_at = NOW()
+      WHERE id = ${id}
+    `;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const columnMissing = msg.includes("accepts_homework") || (msg.includes("column") && msg.includes("does not exist"));
+    if (columnMissing) {
+      await sql`ALTER TABLE "Lesson" ADD COLUMN IF NOT EXISTS accepts_homework BOOLEAN NOT NULL DEFAULT false`;
+      await sql`
+        UPDATE "Lesson"
+        SET title = ${data.title},
+            title_ar = ${data.title_ar ?? null},
+            slug = ${data.slug},
+            content = ${data.content ?? null},
+            video_url = ${data.video_url ?? null},
+            pdf_url = ${data.pdf_url ?? null},
+            "order" = ${data.order},
+            accepts_homework = ${acceptsHomework},
+            updated_at = NOW()
+        WHERE id = ${id}
+      `;
+    } else {
+      throw err;
+    }
+  }
+}
+
+export async function deleteLessonById(lessonId: string): Promise<void> {
+  const legacy = (await detectSchemaMode(sql)) === "legacy";
+  if (legacy) {
+    await sql`DELETE FROM "Chapter" WHERE id = ${lessonId}`;
+    return;
+  }
+  await sql`DELETE FROM "Lesson" WHERE id = ${lessonId}`;
+}
+
 /** Ensure remedial quiz columns + QuizCourseAssignment table exist */
 export async function ensureQuizFeaturesSchema(): Promise<void> {
   return ensureOnce("ensureQuizFeaturesSchema", async () => {
@@ -4129,6 +4214,8 @@ export async function ensureQuizFeaturesSchema(): Promise<void> {
     `;
     await sql`CREATE INDEX IF NOT EXISTS "QuizCourseAssignment_courseId_idx" ON "QuizCourseAssignment"("courseId")`;
     await sql`CREATE INDEX IF NOT EXISTS "QuizCourseAssignment_quizId_idx" ON "QuizCourseAssignment"("quizId")`;
+    await sql`ALTER TABLE "QuizAttempt" ADD COLUMN IF NOT EXISTS answers_json TEXT`;
+    await sql`ALTER TABLE "Quiz" ADD COLUMN IF NOT EXISTS max_attempts INT`;
     await backfillQuestionImageUrls();
   });
 }
@@ -4234,11 +4321,11 @@ export async function markLessonComplete(
 export async function getLatestQuizAttemptsMap(
   userId: string,
   quizIds: string[],
-): Promise<Map<string, { score: number; totalQuestions: number }>> {
-  const map = new Map<string, { score: number; totalQuestions: number }>();
+): Promise<Map<string, { id: string; score: number; totalQuestions: number }>> {
+  const map = new Map<string, { id: string; score: number; totalQuestions: number }>();
   if (quizIds.length === 0) return map;
   const rows = await sql`
-    SELECT DISTINCT ON (quiz_id) quiz_id, score, total_questions
+    SELECT DISTINCT ON (quiz_id) id, quiz_id, score, total_questions
     FROM "QuizAttempt"
     WHERE user_id = ${userId}
       AND quiz_id = ANY(${quizIds})
@@ -4249,6 +4336,7 @@ export async function getLatestQuizAttemptsMap(
     const totalQuestions = Number(row.total_questions ?? 0);
     if (totalQuestions < 1) continue;
     map.set(String(row.quiz_id), {
+      id: String(row.id),
       score: Number(row.score ?? 0),
       totalQuestions,
     });
@@ -4334,12 +4422,40 @@ export async function ensureQuestionImageUrlColumn(): Promise<void> {
   });
 }
 
+export async function ensureQuestionOptionPositionColumn(): Promise<void> {
+  return ensureOnce("ensureQuestionOptionPositionColumn", async () => {
+    await sql`ALTER TABLE "QuestionOption" ADD COLUMN IF NOT EXISTS position INT`;
+    await sql`
+      WITH ranked AS (
+        SELECT id,
+          ROW_NUMBER() OVER (
+            PARTITION BY question_id
+            ORDER BY
+              COALESCE(
+                CASE WHEN id ~ '-opt-[0-9]+$' THEN (substring(id from '-opt-([0-9]+)$'))::int END,
+                999999
+              ),
+              created_at,
+              id
+          ) AS rn
+        FROM "QuestionOption"
+        WHERE position IS NULL
+      )
+      UPDATE "QuestionOption" o
+      SET position = r.rn
+      FROM ranked r
+      WHERE o.id = r.id
+    `;
+  });
+}
+
 function mapQuizRow(row: Record<string, unknown>, legacy: boolean): Record<string, unknown> {
   const base = legacy ? (mapLegacyQuizRow(row) as unknown as Record<string, unknown>) : rowToCamel(row)!;
   return {
     ...base,
     quizType: normalizeQuizType(base.quizType ?? base.quiz_type),
     parentQuizId: (base.parentQuizId ?? base.parent_quiz_id ?? null) as string | null,
+    maxAttempts: base.maxAttempts ?? base.max_attempts ?? null,
   };
 }
 
@@ -4348,6 +4464,7 @@ async function loadQuizQuestionsForEdit(
   legacy: boolean,
 ): Promise<Array<Record<string, unknown> & { options: Record<string, unknown>[] }>> {
   await ensureQuestionImageUrlColumn();
+  await ensureQuestionOptionPositionColumn();
   const questionRows = legacy
     ? await sql`SELECT * FROM "Question" WHERE "quizId" = ${quizId} ORDER BY position ASC`
     : await sql`SELECT * FROM "Question" WHERE quiz_id = ${quizId} ORDER BY "order" ASC`;
@@ -4365,7 +4482,7 @@ async function loadQuizQuestionsForEdit(
     return questions;
   }
   for (const q of questionRows as Record<string, unknown>[]) {
-    const optRows = await sql`SELECT * FROM "QuestionOption" WHERE question_id = ${q.id} ORDER BY id`;
+    const optRows = await sql`SELECT * FROM "QuestionOption" WHERE question_id = ${q.id} ORDER BY position ASC, created_at ASC, id ASC`;
     const mapped = rowToCamel(q)!;
     questions.push({
       ...mapped,
@@ -4619,23 +4736,25 @@ export async function createQuiz(data: {
   time_limit_minutes?: number | null;
   quiz_type?: QuizType;
   parent_quiz_id?: string | null;
+  max_attempts?: number | null;
 }): Promise<Quiz> {
   await ensureQuizFeaturesSchema();
   const legacy = (await detectSchemaMode(sql)) === "legacy";
   const id = generateId();
   const quizType = normalizeQuizType(data.quiz_type ?? "NORMAL");
   const parentQuizId = data.parent_quiz_id?.trim() || null;
+  const maxAttempts = typeof data.max_attempts === "number" && data.max_attempts >= 1 ? data.max_attempts : null;
 
   if (legacy) {
     await sql`
       INSERT INTO "Quiz" (id, "courseId", title, position, "isPublished", timer, "maxAttempts", "quizType", "parentQuizId", "createdAt", "updatedAt")
-      VALUES (${id}, ${data.course_id}, ${data.title}, ${data.order}, true, ${data.time_limit_minutes ?? null}, 1, ${quizType}, ${parentQuizId}, NOW(), NOW())
+      VALUES (${id}, ${data.course_id}, ${data.title}, ${data.order}, true, ${data.time_limit_minutes ?? null}, ${maxAttempts ?? 1}, ${quizType}, ${parentQuizId}, NOW(), NOW())
     `;
   } else {
     const runInsert = async () => {
       await sql`
-        INSERT INTO "Quiz" (id, course_id, title, "order", time_limit_minutes, quiz_type, parent_quiz_id)
-        VALUES (${id}, ${data.course_id}, ${data.title}, ${data.order}, ${data.time_limit_minutes ?? null}, ${quizType}, ${parentQuizId})
+        INSERT INTO "Quiz" (id, course_id, title, "order", time_limit_minutes, quiz_type, parent_quiz_id, max_attempts)
+        VALUES (${id}, ${data.course_id}, ${data.title}, ${data.order}, ${data.time_limit_minutes ?? null}, ${quizType}, ${parentQuizId}, ${maxAttempts})
       `;
     };
     try {
@@ -4658,6 +4777,83 @@ export async function createQuiz(data: {
   const q = rows[0] as Quiz;
   if (!q) throw new Error("فشل إنشاء الاختبار");
   return legacy ? mapLegacyQuizRow(rows[0] as Record<string, unknown>) : (rowToCamel(rows[0] as Record<string, unknown>) as Quiz);
+}
+
+export async function getOwnedQuizIdsForCourse(courseId: string): Promise<string[]> {
+  await ensureQuizFeaturesSchema();
+  const legacy = (await detectSchemaMode(sql)) === "legacy";
+  const rows = legacy
+    ? await sql`SELECT id FROM "Quiz" WHERE "courseId" = ${courseId}`
+    : await sql`SELECT id FROM "Quiz" WHERE course_id = ${courseId}`;
+  return (rows as { id: string }[]).map((r) => String(r.id));
+}
+
+export async function updateQuiz(
+  quizId: string,
+  data: {
+    title: string;
+    order: number;
+    time_limit_minutes?: number | null;
+    quiz_type?: QuizType;
+    parent_quiz_id?: string | null;
+    max_attempts?: number | null;
+  },
+): Promise<void> {
+  await ensureQuizFeaturesSchema();
+  const legacy = (await detectSchemaMode(sql)) === "legacy";
+  const quizType = normalizeQuizType(data.quiz_type ?? "NORMAL");
+  const parentQuizId = data.parent_quiz_id?.trim() || null;
+  const maxAttempts = typeof data.max_attempts === "number" && data.max_attempts >= 1 ? data.max_attempts : null;
+
+  if (legacy) {
+    await sql`
+      UPDATE "Quiz"
+      SET title = ${data.title},
+          position = ${data.order},
+          timer = ${data.time_limit_minutes ?? null},
+          "maxAttempts" = ${maxAttempts ?? 1},
+          "quizType" = ${quizType},
+          "parentQuizId" = ${parentQuizId},
+          "updatedAt" = NOW()
+      WHERE id = ${quizId}
+    `;
+    return;
+  }
+
+  await sql`
+    UPDATE "Quiz"
+    SET title = ${data.title},
+        "order" = ${data.order},
+        time_limit_minutes = ${data.time_limit_minutes ?? null},
+        quiz_type = ${quizType},
+        parent_quiz_id = ${parentQuizId},
+        max_attempts = ${maxAttempts},
+        updated_at = NOW()
+    WHERE id = ${quizId}
+  `;
+}
+
+export async function deleteQuestionsByQuizId(quizId: string): Promise<void> {
+  await ensureQuizFeaturesSchema();
+  const legacy = (await detectSchemaMode(sql)) === "legacy";
+  const questions = legacy
+    ? await sql`SELECT id FROM "Question" WHERE "quizId" = ${quizId}`
+    : await sql`SELECT id FROM "Question" WHERE quiz_id = ${quizId}`;
+  for (const qu of questions as { id: string }[]) {
+    if (!legacy) {
+      await sql`DELETE FROM "QuestionOption" WHERE question_id = ${qu.id}`;
+    }
+  }
+  if (legacy) {
+    await sql`DELETE FROM "Question" WHERE "quizId" = ${quizId}`;
+  } else {
+    await sql`DELETE FROM "Question" WHERE quiz_id = ${quizId}`;
+  }
+}
+
+export async function deleteQuizById(quizId: string): Promise<void> {
+  await deleteQuestionsByQuizId(quizId);
+  await sql`DELETE FROM "Quiz" WHERE id = ${quizId}`;
 }
 
 export async function createQuestion(data: {
@@ -4700,11 +4896,13 @@ export async function createQuestionOption(data: {
   question_id: string;
   text: string;
   is_correct: boolean;
+  position: number;
 }): Promise<QuestionOption> {
+  await ensureQuestionOptionPositionColumn();
   const id = generateId();
   await sql`
-    INSERT INTO "QuestionOption" (id, question_id, text, is_correct)
-    VALUES (${id}, ${data.question_id}, ${data.text}, ${data.is_correct})
+    INSERT INTO "QuestionOption" (id, question_id, text, is_correct, position)
+    VALUES (${id}, ${data.question_id}, ${data.text}, ${data.is_correct}, ${data.position})
   `;
   const rows = await sql`SELECT * FROM "QuestionOption" WHERE id = ${id} LIMIT 1`;
   const o = rows[0] as QuestionOption;
@@ -5721,6 +5919,14 @@ export async function deleteAllHomeworkSubmissions(): Promise<void> {
 
 // ----- QuizAttempt (يتطلب تشغيل scripts/add-quiz-attempts.sql) -----
 export async function countQuizAttemptsByUserAndCourse(userId: string, courseId: string): Promise<number> {
+  return countSubmittedQuizAttemptsByUserAndCourse(userId, courseId);
+}
+
+/** Count submitted quiz attempts (excludes in-progress rows started but not finished). */
+export async function countSubmittedQuizAttemptsByUserAndCourse(
+  userId: string,
+  courseId: string,
+): Promise<number> {
   await ensureQuizFeaturesSchema();
   const legacy = (await detectSchemaMode(sql)) === "legacy";
   const rows = legacy
@@ -5728,6 +5934,7 @@ export async function countQuizAttemptsByUserAndCourse(userId: string, courseId:
         SELECT COUNT(*)::int as c FROM "QuizAttempt" qa
         JOIN "Quiz" q ON q.id = qa.quiz_id
         WHERE qa.user_id = ${userId}
+          AND qa.total_questions >= 1
           AND (
             q."courseId" = ${courseId}
             OR EXISTS (
@@ -5740,6 +5947,7 @@ export async function countQuizAttemptsByUserAndCourse(userId: string, courseId:
         SELECT COUNT(*)::int as c FROM "QuizAttempt" qa
         JOIN "Quiz" q ON q.id = qa.quiz_id
         WHERE qa.user_id = ${userId}
+          AND qa.total_questions >= 1
           AND (
             q.course_id = ${courseId}
             OR EXISTS (
@@ -5751,17 +5959,94 @@ export async function countQuizAttemptsByUserAndCourse(userId: string, courseId:
   return Number((rows[0] as { c: number })?.c ?? 0);
 }
 
+/** Count submitted attempts for a single quiz. */
+export async function countSubmittedQuizAttemptsByUserAndQuiz(
+  userId: string,
+  quizId: string,
+): Promise<number> {
+  await ensureQuizFeaturesSchema();
+  const rows = await sql`
+    SELECT COUNT(*)::int as c FROM "QuizAttempt"
+    WHERE user_id = ${userId} AND quiz_id = ${quizId} AND total_questions >= 1
+  `;
+  return Number((rows[0] as { c: number })?.c ?? 0);
+}
+
+export async function getInProgressQuizAttemptId(
+  userId: string,
+  quizId: string,
+): Promise<string | null> {
+  await ensureQuizFeaturesSchema();
+  const rows = await sql`
+    SELECT id FROM "QuizAttempt"
+    WHERE user_id = ${userId} AND quiz_id = ${quizId} AND total_questions < 1
+    ORDER BY created_at DESC
+    LIMIT 1
+  `;
+  const row = rows[0] as { id: string } | undefined;
+  return row?.id ? String(row.id) : null;
+}
+
+export async function getQuizAttemptById(
+  attemptId: string,
+  userId: string,
+): Promise<{
+  id: string;
+  quizId: string;
+  score: number;
+  totalQuestions: number;
+  answers: Record<string, string>;
+  createdAt: Date;
+  updatedAt: Date;
+} | null> {
+  await ensureQuizFeaturesSchema();
+  const rows = await sql`
+    SELECT id, quiz_id, score, total_questions, answers_json, created_at, updated_at
+    FROM "QuizAttempt"
+    WHERE id = ${attemptId} AND user_id = ${userId} AND total_questions >= 1
+    LIMIT 1
+  `;
+  const row = rows[0] as Record<string, unknown> | undefined;
+  if (!row) return null;
+  let answers: Record<string, string> = {};
+  const rawAnswers = row.answers_json;
+  if (typeof rawAnswers === "string" && rawAnswers.trim()) {
+    try {
+      const parsed = JSON.parse(rawAnswers) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        answers = Object.fromEntries(
+          Object.entries(parsed as Record<string, unknown>).map(([k, v]) => [k, String(v)]),
+        );
+      }
+    } catch {
+      answers = {};
+    }
+  }
+  return {
+    id: String(row.id),
+    quizId: String(row.quiz_id),
+    score: Number(row.score ?? 0),
+    totalQuestions: Number(row.total_questions ?? 0),
+    answers,
+    createdAt: row.created_at as Date,
+    updatedAt: (row.updated_at ?? row.created_at) as Date,
+  };
+}
+
 export async function createQuizAttempt(
   userId: string,
   quizId: string,
   score: number,
-  totalQuestions: number
-): Promise<void> {
+  totalQuestions: number,
+  answersJson?: string | null,
+): Promise<string> {
+  await ensureQuizFeaturesSchema();
   const id = generateId();
   await sql`
-    INSERT INTO "QuizAttempt" (id, user_id, quiz_id, score, total_questions, updated_at)
-    VALUES (${id}, ${userId}, ${quizId}, ${score}, ${totalQuestions}, NOW())
+    INSERT INTO "QuizAttempt" (id, user_id, quiz_id, score, total_questions, answers_json, updated_at)
+    VALUES (${id}, ${userId}, ${quizId}, ${score}, ${totalQuestions}, ${answersJson ?? null}, NOW())
   `;
+  return id;
 }
 
 /** إنشاء محاولة وإرجاع معرّفها (لاستخدامها عند بدء الاختبار) */
@@ -5786,11 +6071,16 @@ export async function updateQuizAttemptById(params: {
   quizId: string;
   score: number;
   totalQuestions: number;
+  answersJson?: string | null;
 }): Promise<boolean> {
-  const { attemptId, userId, quizId, score, totalQuestions } = params;
+  await ensureQuizFeaturesSchema();
+  const { attemptId, userId, quizId, score, totalQuestions, answersJson } = params;
   const rows = await sql`
     UPDATE "QuizAttempt"
-    SET score = ${score}, total_questions = ${totalQuestions}, updated_at = NOW()
+    SET score = ${score},
+        total_questions = ${totalQuestions},
+        answers_json = ${answersJson ?? null},
+        updated_at = NOW()
     WHERE id = ${attemptId} AND user_id = ${userId} AND quiz_id = ${quizId}
     RETURNING id
   `;
