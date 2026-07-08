@@ -2,7 +2,7 @@ import { getServerSession } from "next-auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { authOptions } from "@/lib/auth";
-import { getCourseForEdit } from "@/lib/db";
+import { getCourseForEdit, getUsersByRole } from "@/lib/db";
 import { canManageCourse } from "@/lib/permissions";
 import { EditCourseForm, type ContentOrderEntry } from "./EditCourseForm";
 
@@ -81,6 +81,7 @@ export default async function EditCoursePage({ params }: Props) {
     isPublished: Boolean(c.isPublished ?? c.is_published ?? true),
     maxQuizAttempts: typeof c.maxQuizAttempts === "number" ? c.maxQuizAttempts : typeof c.max_quiz_attempts === "number" ? c.max_quiz_attempts : null,
     categoryId: (c.categoryId ?? c.category_id ?? "") as string,
+    teacherId: createdBy ?? "",
     lessons: data.lessons.map((l) => {
       const row = l as Record<string, unknown>;
       return {
@@ -139,6 +140,15 @@ export default async function EditCoursePage({ params }: Props) {
     ),
   };
 
+  const isAdmin = role === "ADMIN";
+  const teachers = isAdmin
+    ? (await getUsersByRole("TEACHER")).map((u) => ({
+        id: u.id,
+        name: u.name ?? null,
+        email: u.email ?? null,
+      }))
+    : [];
+
   return (
     <div>
       <Link
@@ -150,7 +160,7 @@ export default async function EditCoursePage({ params }: Props) {
       <h2 className="mt-4 text-xl font-bold text-[var(--color-foreground)]">
         تعديل الدورة
       </h2>
-      <EditCourseForm courseId={id} initialData={initialData} />
+      <EditCourseForm courseId={id} initialData={initialData} isAdmin={isAdmin} teachers={teachers} />
     </div>
   );
 }

@@ -18,6 +18,7 @@ type CourseRow = {
   lessonsCount: number;
   enrollmentsCount: number;
   category: { id: string; name: string; nameAr?: string | null } | null;
+  teacher?: { id: string; name: string | null; email: string | null } | null;
 };
 
 function CourseTableRow({
@@ -27,6 +28,7 @@ function CourseTableRow({
   onDelete,
   t,
   egp,
+  showTeacherColumn,
 }: {
   c: CourseRow;
   deletingId: string | null;
@@ -34,6 +36,7 @@ function CourseTableRow({
   onDelete: (id: string) => void;
   t: (k: string, fb?: string) => string;
   egp: string;
+  showTeacherColumn: boolean;
 }) {
   const L = "dashboard.coursesList";
   return (
@@ -48,6 +51,11 @@ function CourseTableRow({
           </span>
         </div>
       </td>
+      {showTeacherColumn && (
+        <td className="p-3 text-[var(--color-muted)]">
+          {c.teacher?.name ?? c.teacher?.email ?? "—"}
+        </td>
+      )}
       <td className="p-3 text-[var(--color-muted)]">{c.lessonsCount}</td>
       <td className="p-3 text-[var(--color-muted)]">{c.enrollmentsCount}</td>
       <td className="p-3">
@@ -94,7 +102,13 @@ function CourseTableRow({
   );
 }
 
-export function CoursesManageList({ courses }: { courses: CourseRow[] }) {
+export function CoursesManageList({
+  courses,
+  showTeacherColumn = false,
+}: {
+  courses: CourseRow[];
+  showTeacherColumn?: boolean;
+}) {
   const router = useRouter();
   const t = useT();
   const L = "dashboard.coursesList";
@@ -209,6 +223,7 @@ export function CoursesManageList({ courses }: { courses: CourseRow[] }) {
                 <thead>
                   <tr className="border-b border-[var(--color-border)] bg-[var(--color-background)]/30">
                     <th className={thClass}>{t(`${L}.colThumbTitle`)}</th>
+                    {showTeacherColumn && <th className={thClass}>{t(`${L}.colTeacher`, "Teacher")}</th>}
                     <th className={thClass}>{t(`${L}.colLessons`)}</th>
                     <th className={thClass}>{t(`${L}.colStudents`)}</th>
                     <th className={thClass}>{t(`${L}.colPrice`)}</th>
@@ -226,6 +241,7 @@ export function CoursesManageList({ courses }: { courses: CourseRow[] }) {
                       onDelete={handleDelete}
                       t={t}
                       egp={egp}
+                      showTeacherColumn={showTeacherColumn}
                     />
                   ))}
                 </tbody>

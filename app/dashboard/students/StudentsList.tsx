@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { AddBalanceButton } from "./AddBalanceButton";
 import { useT } from "@/components/LocaleProvider";
 import { useDashboardTable } from "@/lib/i18n/dashboard-table";
+import { fillMessage } from "@/lib/i18n/interpolate";
 
 type Course = { id: string; title: string; titleAr: string | null; slug: string };
 
@@ -55,7 +56,6 @@ export function StudentsList({
   canManageEnrollments?: boolean;
   canEditFullProfile?: boolean;
 }) {
-  void isAdmin;
   const t = useT();
   const { dir, thClass } = useDashboardTable();
   const router = useRouter();
@@ -70,6 +70,7 @@ export function StudentsList({
   const [coursesStudent, setCoursesStudent] = useState<Student | null>(null);
   const [addCourseId, setAddCourseId] = useState("");
   const [loading, setLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [enrollError, setEnrollError] = useState("");
 
@@ -205,6 +206,31 @@ export function StudentsList({
     });
   }
 
+  async function handleDeleteStudent(s: Student) {
+    const confirmed = window.confirm(
+      fillMessage(
+        t(
+          "dashboard.studentsPage.confirmDeleteStudent",
+          "Permanently delete student account «{name}»? This cannot be undone.",
+        ),
+        { name: s.name },
+      ),
+    );
+    if (!confirmed) return;
+    setError("");
+    setDeletingId(s.id);
+    const res = await fetch(`/api/dashboard/students/${s.id}`, { method: "DELETE" });
+    const data = await res.json().catch(() => ({}));
+    setDeletingId(null);
+    if (!res.ok) {
+      setError(data.error ?? t("dashboard.studentsPage.errorDeleteFailed", "Failed to delete account"));
+      return;
+    }
+    if (editStudent?.id === s.id) setEditStudent(null);
+    if (coursesStudent?.id === s.id) setCoursesStudent(null);
+    router.refresh();
+  }
+
   return (
     <div>
       <div className="mb-4">
@@ -226,6 +252,9 @@ export function StudentsList({
           className="mt-1 w-full max-w-md rounded-[var(--radius-btn)] border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2"
         />
       </div>
+      {error ? (
+        <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p>
+      ) : null}
       <div className="overflow-x-auto rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)]">
         <table dir={dir} className="w-full">
           <thead>
@@ -244,6 +273,9 @@ export function StudentsList({
                 <th className={thClass}>{t("dashboard.studentsPage.colManageCourses", "Manage courses")}</th>
               )}
               <th className={thClass}>{t("dashboard.studentsPage.colEdit", "Edit")}</th>
+              {isAdmin && (
+                <th className={thClass}>{t("dashboard.studentsPage.colDelete", "Delete")}</th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -285,6 +317,20 @@ export function StudentsList({
                     {t("dashboard.studentsPage.edit", "Edit")}
                   </button>
                 </td>
+                {isAdmin && (
+                  <td className="p-3">
+                    <button
+                      type="button"
+                      onClick={() => void handleDeleteStudent(s)}
+                      disabled={deletingId === s.id}
+                      className="text-sm font-medium text-red-600 hover:underline disabled:opacity-50 dark:text-red-400"
+                    >
+                      {deletingId === s.id
+                        ? t("dashboard.studentsPage.deleting", "Deleting...")
+                        : t("dashboard.studentsPage.delete", "Delete")}
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

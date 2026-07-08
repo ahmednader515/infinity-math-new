@@ -12,6 +12,7 @@ import {
   findCategoryByNameForDashboard,
   createCategory,
   categoryIsManageableOnDashboard,
+  assertAssignableTeacher,
 } from "@/lib/db";
 import {
   saveCourseQuizzes,
@@ -53,6 +54,7 @@ export async function PUT(
     categoryNameAr?: string;
     categoryNameEn?: string;
     acceptsHomework?: boolean;
+    teacherId?: string;
     lessons?: LessonInput[];
     quizzes?: CourseQuizInput[];
     contentOrder?: ContentOrderEntry[];
@@ -121,6 +123,17 @@ export async function PUT(
     }
   }
 
+  let createdByUpdate: string | undefined;
+  if (session.user.role === "ADMIN" && body.teacherId?.trim()) {
+    try {
+      await assertAssignableTeacher(body.teacherId.trim());
+      createdByUpdate = body.teacherId.trim();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "المدرس المحدد غير صالح";
+      return NextResponse.json({ error: msg }, { status: 400 });
+    }
+  }
+
   await updateCourse(id, {
     title: titleEn || titleAr,
     title_ar: titleAr,
@@ -134,6 +147,7 @@ export async function PUT(
     max_quiz_attempts: body.maxQuizAttempts ?? null,
     ...(categoryId !== undefined && { category_id: categoryId }),
     ...(body.acceptsHomework !== undefined && { accepts_homework: body.acceptsHomework }),
+    ...(createdByUpdate !== undefined && { created_by_id: createdByUpdate }),
   });
 
   await deleteLessonsByCourseId(id);
@@ -216,6 +230,7 @@ export async function GET(
     isPublished: c.isPublished ?? c.is_published ?? true,
     maxQuizAttempts: c.maxQuizAttempts ?? c.max_quiz_attempts ?? null,
     categoryId: (c as { categoryId?: string | null }).categoryId ?? null,
+    teacherId: createdBy,
     lessons: data.lessons.map((l) => ({
       title: l.title,
       titleAr: l.titleAr ?? l.title_ar,

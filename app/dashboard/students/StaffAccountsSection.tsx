@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useT } from "@/components/LocaleProvider";
 import { useDashboardTable } from "@/lib/i18n/dashboard-table";
+import { fillMessage } from "@/lib/i18n/interpolate";
 
 type UserRow = { id: string; name: string | null; email: string | null; role: string };
 
@@ -36,6 +37,7 @@ export function StaffAccountsSection({
   const [editRole, setEditRole] = useState("");
   const [editPassword, setEditPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   const staff = [
@@ -79,6 +81,30 @@ export function StaffAccountsSection({
     router.refresh();
   }
 
+  async function handleDelete(u: UserRow) {
+    const confirmed = window.confirm(
+      fillMessage(
+        t(
+          "dashboard.studentsPage.confirmDeleteStaff",
+          "Permanently delete account «{name}»? This cannot be undone.",
+        ),
+        { name: u.name ?? u.email ?? u.id },
+      ),
+    );
+    if (!confirmed) return;
+    setError("");
+    setDeletingId(u.id);
+    const res = await fetch(`/api/dashboard/students/${u.id}`, { method: "DELETE" });
+    const data = await res.json().catch(() => ({}));
+    setDeletingId(null);
+    if (!res.ok) {
+      setError(data.error ?? t("dashboard.studentsPage.errorDeleteFailed", "Failed to delete account"));
+      return;
+    }
+    if (editUser?.id === u.id) setEditUser(null);
+    router.refresh();
+  }
+
   if (staff.length === 0) return null;
 
   const dash = t("dashboard.studentsPage.dash", "—");
@@ -88,6 +114,7 @@ export function StaffAccountsSection({
       <h3 className="mb-4 text-lg font-semibold text-[var(--color-foreground)]">
         {t("dashboard.studentsPage.staffTableTitle", "Admin and assistant admin accounts")}
       </h3>
+      {error ? <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p> : null}
       <div className="overflow-x-auto">
         <table dir={dir} className="w-full text-sm">
           <thead>
@@ -96,6 +123,7 @@ export function StaffAccountsSection({
               <th className={thClassCompact}>{t("dashboard.studentsPage.colEmailFull", "Email")}</th>
               <th className={thClassCompact}>{t("dashboard.studentsPage.colRole", "Role")}</th>
               <th className={thClassCompact}>{t("dashboard.studentsPage.colEdit", "Edit")}</th>
+              <th className={thClassCompact}>{t("dashboard.studentsPage.colDelete", "Delete")}</th>
             </tr>
           </thead>
           <tbody>
@@ -111,6 +139,18 @@ export function StaffAccountsSection({
                     className="text-sm font-medium text-[var(--color-primary)] hover:underline"
                   >
                     {t("dashboard.studentsPage.edit", "Edit")}
+                  </button>
+                </td>
+                <td className="py-2 px-3">
+                  <button
+                    type="button"
+                    onClick={() => void handleDelete(u)}
+                    disabled={deletingId === u.id}
+                    className="text-sm font-medium text-red-600 hover:underline disabled:opacity-50 dark:text-red-400"
+                  >
+                    {deletingId === u.id
+                      ? t("dashboard.studentsPage.deleting", "Deleting...")
+                      : t("dashboard.studentsPage.delete", "Delete")}
                   </button>
                 </td>
               </tr>

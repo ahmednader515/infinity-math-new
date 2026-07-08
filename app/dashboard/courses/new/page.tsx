@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { authOptions } from "@/lib/auth";
+import { getUsersByRole } from "@/lib/db";
 import { getServerTranslator } from "@/lib/i18n/server";
 import { CreateCourseForm } from "./CreateCourseForm";
 
@@ -13,6 +14,14 @@ export default async function NewCoursePage() {
     redirect("/dashboard");
   }
   const t = await getServerTranslator();
+  const isAdmin = role === "ADMIN";
+  const teachers = isAdmin
+    ? (await getUsersByRole("TEACHER")).map((u) => ({
+        id: u.id,
+        name: u.name ?? null,
+        email: u.email ?? null,
+      }))
+    : [];
 
   return (
     <div>
@@ -25,7 +34,7 @@ export default async function NewCoursePage() {
       <h2 className="mt-4 text-xl font-bold text-[var(--color-foreground)]">
         {t("dashboard.courseNewPage.title")}
       </h2>
-      <CreateCourseForm />
+      <CreateCourseForm isAdmin={isAdmin} teachers={teachers} />
     </div>
   );
 }

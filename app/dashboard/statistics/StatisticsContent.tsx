@@ -24,6 +24,7 @@ type EnrollmentInfo = { course: CourseInfo };
 
 type StudentWithDetails = {
   student: { id: string; name: string | null; email: string | null };
+  completedLessonsCount: number;
   enrollments: EnrollmentInfo[];
   userAttempts: Attempt[];
 };
@@ -194,7 +195,7 @@ export default function StatisticsContent({
           </p>
         ) : (
           <ul className="space-y-4">
-            {filteredStudentsWithDetails.map(({ student: s, enrollments, userAttempts }) => (
+            {filteredStudentsWithDetails.map(({ student: s, enrollments, userAttempts, completedLessonsCount }) => (
               <li
                 key={s.id}
                 className="rounded-[var(--radius-btn)] border border-[var(--color-border)] bg-[var(--color-background)] p-4"
@@ -212,6 +213,9 @@ export default function StatisticsContent({
                     </span>
                     <span>
                       {t(`${pq}.quizAttemptsCount`, "Quiz attempts:")} {userAttempts.length}
+                    </span>
+                    <span>
+                      {t(`${pq}.completedLessonsCount`, "Completed lessons:")} {completedLessonsCount}
                     </span>
                   </div>
                 </div>

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { hash } from "bcryptjs";
 import { authOptions } from "@/lib/auth";
-import { getUserById, getUserByEmailExcludingId, updateUser, clearCurrentSessionId } from "@/lib/db";
+import { getUserById, getUserByEmailExcludingId, updateUser, clearCurrentSessionId, deleteUserById, getUsersByRole } from "@/lib/db";
 
 const ROLES = ["ADMIN", "ASSISTANT_ADMIN", "STUDENT"] as const;
 
@@ -65,6 +65,49 @@ export async function PATCH(
 
   if (data.role !== undefined) {
     await clearCurrentSessionId(id);
+  }
+
+  return NextResponse.json({ success: true });
+}
+
+/** حذف حساب — للأدمن فقط */
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await getServerSession(authOptions);
+  if (!session || session.user.role !== "ADMIN") {
+    return NextResponse.json({ error: "غير مصرح" }, { status: 403 });
+  }
+
+  const { id } = await params;
+  if (id === session.user.id) {
+    return NextResponse.json({ error: "لا يمكنك حذف حسابك الحالي" }, { status: 400 });
+  }
+
+  const targetUser = await getUserById(id);
+  if (!targetUser) {
+    return NextResponse.json({ error: "المستخدم غير موجود" }, { status: 404 });
+  }
+
+  if (targetUser.role === "ADMIN") {
+    const admins = await getUsersByRole("ADMIN");
+    if (admins.length <= 1) {
+      return NextResponse.json({ error: "لا يمكن حذف آخر حساب أدمن في المنصة" }, { status: 400 });
+    }
+  }
+
+  try {
+    const deleted = await deleteUserById(id);
+    if (!deleted) {
+      return NextResponse.json({ error: "المستخدم غير موجود" }, { status: 404 });
+    }
+  } catch (e) {
+    console.error("DELETE dashboard/students/[id]", e);
+    return NextResponse.json(
+      { error: "تعذر حذف الحساب — قد يكون مرتبطاً ببيانات لا تزال مطلوبة" },
+      { status: 500 },
+    );
   }
 
   return NextResponse.json({ success: true });

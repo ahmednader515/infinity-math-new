@@ -9,6 +9,7 @@ import {
   findCategoryByNameForDashboard,
   createCategory,
   categoryIsManageableOnDashboard,
+  assertAssignableTeacher,
 } from "@/lib/db";
 import {
   saveCourseQuizzes,
@@ -58,6 +59,7 @@ export async function POST(request: NextRequest) {
     categoryNameAr?: string;
     categoryNameEn?: string;
     acceptsHomework?: boolean;
+    teacherId?: string;
     lessons?: LessonInput[];
     quizzes?: QuizInput[];
     contentOrder?: CourseContentOrderEntry[];
@@ -82,14 +84,30 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "رابط الدورة مستخدم مسبقاً" }, { status: 400 });
   }
 
+  const role = session.user.role;
+  let courseOwnerId = session.user.id;
+  if (role === "ADMIN") {
+    const teacherId = body.teacherId?.trim();
+    if (!teacherId) {
+      return NextResponse.json({ error: "يجب اختيار مدرس للكورس" }, { status: 400 });
+    }
+    try {
+      await assertAssignableTeacher(teacherId);
+      courseOwnerId = teacherId;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "المدرس المحدد غير صالح";
+      return NextResponse.json({ error: msg }, { status: 400 });
+    }
+  }
+
   let categoryId: string | null = null;
   const catNameAr = (body.categoryNameAr ?? body.categoryName)?.trim();
   const catNameEn = (body.categoryNameEn ?? catNameAr)?.trim();
-  const role = session.user.role;
+  const categoryOwnerId = role === "ADMIN" ? courseOwnerId : session.user.id;
   if (catNameAr || catNameEn) {
     let cat =
-      (catNameAr ? await findCategoryByNameForDashboard(catNameAr, session.user.id, role) : null) ??
-      (catNameEn ? await findCategoryByNameForDashboard(catNameEn, session.user.id, role) : null);
+      (catNameAr ? await findCategoryByNameForDashboard(catNameAr, categoryOwnerId, role) : null) ??
+      (catNameEn ? await findCategoryByNameForDashboard(catNameEn, categoryOwnerId, role) : null);
     if (!cat) {
       const slugBase = (catNameEn || catNameAr || "cat");
       const slugCat = slugBase.toLowerCase().replace(/\s+/g, "-").replace(/[^\w\u0600-\u06FF-]+/g, "") || "cat";
@@ -98,7 +116,7 @@ export async function POST(request: NextRequest) {
         name: catNameEn || catNameAr || slugBase,
         name_ar: catNameAr || catNameEn || slugBase,
         slug: uniqueSlug,
-        created_by_id: session.user.id,
+        created_by_id: categoryOwnerId,
       });
     }
     categoryId = cat.id;
@@ -124,7 +142,7 @@ export async function POST(request: NextRequest) {
       image_url: body.imageUrl?.trim() || null,
       price: body.price ?? 0,
       is_published: true,
-      created_by_id: session.user.id,
+      created_by_id: courseOwnerId,
       max_quiz_attempts: body.maxQuizAttempts ?? null,
       category_id: categoryId,
       accepts_homework: !!body.acceptsHomework,

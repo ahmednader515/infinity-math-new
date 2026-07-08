@@ -247,6 +247,17 @@ export async function getUserById(id: string): Promise<User | null> {
   return row as unknown as User;
 }
 
+/** يتحقق أن المعرّف يعود لمستخدم برتبة مدرس — لإسناد الكورسات من لوحة الأدمن */
+export async function assertAssignableTeacher(userId: string): Promise<User> {
+  const id = String(userId ?? "").trim();
+  if (!id) throw new Error("معرّف المدرس مطلوب");
+  const user = await getUserById(id);
+  if (!user || user.role !== "TEACHER") {
+    throw new Error("المدرس المحدد غير موجود أو غير صالح");
+  }
+  return user;
+}
+
 /** Whether the DB supports storing one active session id per user (legacy schema does not). */
 export async function supportsConcurrentSessionTracking(): Promise<boolean> {
   return (await detectSchemaMode(sql)) !== "legacy";
@@ -563,6 +574,16 @@ export async function updateUser(
       /* عمود غير موجود */
     }
   }
+}
+
+/** حذف مستخدم نهائياً — يعتمد على ON DELETE CASCADE في الجداول المرتبطة */
+export async function deleteUserById(id: string): Promise<boolean> {
+  if ((await detectSchemaMode(sql)) === "legacy") {
+    const rows = await sql`DELETE FROM "User" WHERE id = ${id} RETURNING id`;
+    return (rows as unknown[]).length > 0;
+  }
+  const rows = await sql`DELETE FROM "User" WHERE id = ${id} RETURNING id`;
+  return (rows as unknown[]).length > 0;
 }
 
 // ----- PasswordChangeRequest (طلبات تغيير كلمة المرور) -----
@@ -3688,6 +3709,7 @@ export async function getCoursesWithCounts(): Promise<
       lessonsCount: number;
       enrollmentsCount: number;
       category?: { id: string; name: string; nameAr?: string | null; slug: string } | null;
+      teacher?: { id: string; name: string | null; email: string | null; role: string } | null;
     }
   >
 > {
@@ -3695,26 +3717,45 @@ export async function getCoursesWithCounts(): Promise<
   if ((await detectSchemaMode(sql)) === "legacy") {
     const rows = await sql`
       SELECT c.*,
+        u.id as teacher_id, u."fullName" as teacher_name, u.email as teacher_email, u.role as teacher_role,
         (SELECT COUNT(*)::int FROM "Chapter" WHERE "courseId" = c.id) as lessons_count,
         (SELECT COUNT(*)::int FROM "Purchase" WHERE "courseId" = c.id AND status = 'ACTIVE') as enrollments_count
       FROM "Course" c
+      LEFT JOIN "User" u ON u.id = COALESCE(c.created_by_id, c."userId")
       ORDER BY c."createdAt" DESC
     `;
-    return (rows as Record<string, unknown>[]).map((r) => ({
-      ...mapLegacyCourseRow(r),
-      lessonsCount: Number((r as { lessons_count?: number }).lessons_count ?? 0),
-      enrollmentsCount: Number((r as { enrollments_count?: number }).enrollments_count ?? 0),
-      category: null,
-    }));
+    return (rows as Record<string, unknown>[]).map((r) => {
+      const teacherId = r.teacher_id != null ? String(r.teacher_id) : null;
+      const teacherRole = r.teacher_role != null ? String(r.teacher_role) : null;
+      const teacher =
+        teacherId && teacherRole === "TEACHER"
+          ? {
+              id: teacherId,
+              name: r.teacher_name != null ? String(r.teacher_name) : null,
+              email: r.teacher_email != null ? String(r.teacher_email) : null,
+              role: teacherRole,
+            }
+          : null;
+      const { teacher_id, teacher_name, teacher_email, teacher_role, ...courseRow } = r;
+      return {
+        ...mapLegacyCourseRow(courseRow),
+        lessonsCount: Number((r as { lessons_count?: number }).lessons_count ?? 0),
+        enrollmentsCount: Number((r as { enrollments_count?: number }).enrollments_count ?? 0),
+        category: null,
+        teacher,
+      };
+    });
   }
   const rows = await sql`
     SELECT c.*,
       ${courseRatingSelectSql()},
       (SELECT COUNT(*)::int FROM "Lesson" WHERE course_id = c.id) as lessons_count,
       (SELECT COUNT(*)::int FROM "Enrollment" WHERE course_id = c.id) as enrollments_count,
-      cat.id as cat_id, cat.name as cat_name, cat.name_ar as cat_name_ar, cat.slug as cat_slug, cat."order" as cat_order
+      cat.id as cat_id, cat.name as cat_name, cat.name_ar as cat_name_ar, cat.slug as cat_slug, cat."order" as cat_order,
+      u.id as teacher_id, u.name as teacher_name, u.email as teacher_email, u.role as teacher_role
     FROM "Course" c
     LEFT JOIN "Category" cat ON c.category_id = cat.id
+    LEFT JOIN "User" u ON u.id = c.created_by_id
     ORDER BY cat."order" ASC NULLS LAST, c."order" ASC, c.created_at DESC
   `;
   return (rows as Record<string, unknown>[]).map((r) => {
@@ -3722,18 +3763,31 @@ export async function getCoursesWithCounts(): Promise<
       r.cat_id != null
         ? rowToCamel({ id: r.cat_id, name: r.cat_name, name_ar: r.cat_name_ar, slug: r.cat_slug })
         : null;
-    const { cat_id, cat_name, cat_name_ar, cat_slug, cat_order, ...rest } = r;
+    const teacherId = r.teacher_id != null ? String(r.teacher_id) : null;
+    const teacherRole = r.teacher_role != null ? String(r.teacher_role) : null;
+    const teacher =
+      teacherId && teacherRole === "TEACHER"
+        ? {
+            id: teacherId,
+            name: r.teacher_name != null ? String(r.teacher_name) : null,
+            email: r.teacher_email != null ? String(r.teacher_email) : null,
+            role: teacherRole,
+          }
+        : null;
+    const { cat_id, cat_name, cat_name_ar, cat_slug, cat_order, teacher_id, teacher_name, teacher_email, teacher_role, ...rest } = r;
     return {
       ...rowToCamel(rest),
       lessonsCount: Number((r as { lessons_count?: number }).lessons_count ?? 0),
       enrollmentsCount: Number((r as { enrollments_count?: number }).enrollments_count ?? 0),
       category: category as { id: string; name: string; nameAr?: string | null; slug: string } | null,
+      teacher,
     };
   }) as Array<
     Record<string, unknown> & {
       lessonsCount: number;
       enrollmentsCount: number;
       category?: { id: string; name: string; nameAr?: string | null; slug: string } | null;
+      teacher?: { id: string; name: string | null; email: string | null; role: string } | null;
     }
   >;
 }
@@ -3918,6 +3972,7 @@ export async function updateCourse(
     max_quiz_attempts?: number | null;
     category_id?: string | null;
     accepts_homework?: boolean;
+    created_by_id?: string;
   }
 ): Promise<void> {
   await ensureCourseBilingualColumns();
@@ -3941,6 +3996,10 @@ export async function updateCourse(
     } catch {
       /* العمود قد يكون غير موجود قبل تشغيل scripts/add-homework.sql */
     }
+  }
+  if (data.created_by_id !== undefined) {
+    await sql`UPDATE "Course" SET created_by_id = ${data.created_by_id}, updated_at = NOW() WHERE id = ${id}`;
+    await syncCourseLegacyColumns(id, { created_by_id: data.created_by_id });
   }
 }
 
@@ -4101,6 +4160,40 @@ export async function getCompletedLessonIdsForCourse(
     WHERE user_id = ${userId} AND course_id = ${courseId}
   `;
   return new Set((rows as { lesson_id: string }[]).map((r) => String(r.lesson_id)));
+}
+
+/** عدد الحصص المكتملة لكل طالب — اختيارياً ضمن كورسات محددة (لإحصائيات المدرس) */
+export async function getCompletedLessonCountsForUsers(
+  userIds: string[],
+  courseIds?: string[],
+): Promise<Map<string, number>> {
+  await ensureLessonProgressSchema();
+  const map = new Map<string, number>();
+  if (userIds.length === 0) return map;
+  const uniqUserIds = [...new Set(userIds.map((id) => String(id).trim()).filter(Boolean))];
+  const scopedCourseIds =
+    courseIds?.map((id) => String(id).trim()).filter(Boolean) ?? [];
+  const rows =
+    scopedCourseIds.length > 0
+      ? await sql`
+          SELECT user_id, COUNT(*)::int AS cnt
+          FROM "LessonProgress"
+          WHERE user_id = ANY(${uniqUserIds}::text[])
+            AND course_id = ANY(${scopedCourseIds}::text[])
+          GROUP BY user_id
+        `
+      : await sql`
+          SELECT user_id, COUNT(*)::int AS cnt
+          FROM "LessonProgress"
+          WHERE user_id = ANY(${uniqUserIds}::text[])
+          GROUP BY user_id
+        `;
+  for (const row of rows as Array<{ user_id?: unknown; cnt?: unknown }>) {
+    if (row.user_id != null) {
+      map.set(String(row.user_id), Number(row.cnt ?? 0));
+    }
+  }
+  return map;
 }
 
 export async function isLessonCompleteForUser(

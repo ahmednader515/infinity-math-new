@@ -16,6 +16,7 @@ import { QuestionImageField } from "../QuestionImageField";
 type CreateContentOrderEntry = { type: "lesson"; index: number } | { type: "quiz"; index: number };
 
 type CategoryOption = { id: string; name: string; nameAr?: string | null };
+type TeacherOption = { id: string; name: string | null; email: string | null };
 type LessonRow = { title: string; videoUrl: string; content: string; pdfUrl: string; acceptsHomework: boolean };
 
 const defaultQuiz: QuizRow = {
@@ -26,12 +27,19 @@ const defaultQuiz: QuizRow = {
   questions: [{ type: "MULTIPLE_CHOICE", questionText: "", imageUrl: "", options: [{ text: "", isCorrect: false }] }],
 };
 
-export function CreateCourseForm() {
+export function CreateCourseForm({
+  isAdmin = false,
+  teachers = [],
+}: {
+  isAdmin?: boolean;
+  teachers?: TeacherOption[];
+}) {
   const router = useRouter();
   const t = useT();
   const Cf = "dashboard.courseForm";
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [teacherId, setTeacherId] = useState("");
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [form, setForm] = useState({
     titleAr: "",
@@ -242,6 +250,10 @@ export function CreateCourseForm() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    if (isAdmin && !teacherId.trim()) {
+      setError(t(`${Cf}.assignTeacherRequired`, "Please select a teacher for this course."));
+      return;
+    }
     setLoading(true);
     try {
     const slug = slugify(form.titleAr || "course");
@@ -294,6 +306,7 @@ export function CreateCourseForm() {
       imageUrl: form.imageUrl.trim() || undefined,
       price: form.price ? parseFloat(form.price) : 0,
       maxQuizAttempts: form.maxQuizAttempts.trim() ? parseInt(form.maxQuizAttempts, 10) : null,
+      ...(isAdmin && teacherId.trim() ? { teacherId: teacherId.trim() } : {}),
       ...(form.categoryNameAr.trim()
         ? { categoryNameAr: form.categoryNameAr.trim() }
         : form.categoryId ? { categoryId: form.categoryId } : {}),
@@ -340,6 +353,27 @@ export function CreateCourseForm() {
       <section className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
         <h3 className="mb-4 text-lg font-semibold text-[var(--color-foreground)]">{t(`${Cf}.sectionCourseBasics`)}</h3>
         <div className="space-y-4">
+          {isAdmin && (
+            <div>
+              <label className="block text-sm font-medium text-[var(--color-foreground)]">
+                {t(`${Cf}.assignTeacherLabel`, "Assigned teacher")}
+              </label>
+              <select
+                value={teacherId}
+                onChange={(e) => setTeacherId(e.target.value)}
+                required
+                className="mt-1 w-full rounded-[var(--radius-btn)] border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2"
+              >
+                <option value="">{t(`${Cf}.assignTeacherPlaceholder`, "Select a teacher")}</option>
+                {teachers.map((teacher) => (
+                  <option key={teacher.id} value={teacher.id}>
+                    {teacher.name ?? teacher.email ?? teacher.id}
+                    {teacher.name && teacher.email ? ` (${teacher.email})` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-[var(--color-foreground)]">{t(`${Cf}.courseImageLabel`)}</label>
             <p className="mt-1 text-xs text-[var(--color-muted)]">{t(`${Cf}.courseImageHelp`)}</p>
