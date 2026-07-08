@@ -142,13 +142,8 @@ export async function POST(request: NextRequest) {
       image_url: body.imageUrl?.trim() || null,
       price: body.price ?? 0,
       is_published: true,
-<<<<<<< HEAD
       created_by_id: courseOwnerId,
       max_quiz_attempts: body.maxQuizAttempts ?? null,
-=======
-      created_by_id: session.user.id,
-      max_quiz_attempts: null,
->>>>>>> 0ea2bb98d9779d1b7e9a4c3a0fb5df7c48c00e0c
       category_id: categoryId,
       accepts_homework: !!body.acceptsHomework,
     });

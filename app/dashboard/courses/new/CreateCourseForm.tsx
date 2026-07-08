@@ -312,11 +312,7 @@ export function CreateCourseForm({
       shortDescAr: form.shortDescAr.trim() || undefined,
       imageUrl: form.imageUrl.trim() || undefined,
       price: form.price ? parseFloat(form.price) : 0,
-<<<<<<< HEAD
-      maxQuizAttempts: form.maxQuizAttempts.trim() ? parseInt(form.maxQuizAttempts, 10) : null,
       ...(isAdmin && teacherId.trim() ? { teacherId: teacherId.trim() } : {}),
-=======
->>>>>>> 0ea2bb98d9779d1b7e9a4c3a0fb5df7c48c00e0c
       ...(form.categoryNameAr.trim()
         ? { categoryNameAr: form.categoryNameAr.trim() }
         : form.categoryId ? { categoryId: form.categoryId } : {}),

@@ -20,12 +20,8 @@ import { QuestionImageField } from "../../QuestionImageField";
 export type { ContentOrderEntry };
 
 type CategoryOption = { id: string; name: string; nameAr?: string | null };
-<<<<<<< HEAD
 type TeacherOption = { id: string; name: string | null; email: string | null };
-type LessonRow = { title: string; videoUrl: string; content: string; pdfUrl: string; acceptsHomework: boolean };
-=======
 type LessonRow = { id?: string; title: string; videoUrl: string; content: string; pdfUrl: string; acceptsHomework: boolean };
->>>>>>> 0ea2bb98d9779d1b7e9a4c3a0fb5df7c48c00e0c
 type QuestionOptionRow = { text: string; isCorrect: boolean };
 type QuestionRow = { type: "MULTIPLE_CHOICE" | "TRUE_FALSE"; questionText: string; imageUrl: string; options: QuestionOptionRow[] };
 
@@ -116,6 +112,7 @@ export function EditCourseForm({
     imageUrl: initialData.imageUrl,
     price: initialData.price,
     isPublished: initialData.isPublished,
+    maxQuizAttempts: initialData.maxQuizAttempts != null ? String(initialData.maxQuizAttempts) : "",
     categoryId: initialData.categoryId ?? "",
     categoryNameAr: "",
     categoryNameEn: "",
@@ -491,11 +488,8 @@ export function EditCourseForm({
       imageUrl: form.imageUrl.trim() || undefined,
       price: form.price ? parseFloat(form.price) : 0,
       isPublished: form.isPublished,
-<<<<<<< HEAD
       maxQuizAttempts: form.maxQuizAttempts.trim() ? parseInt(form.maxQuizAttempts, 10) : null,
       ...(isAdmin && teacherId.trim() ? { teacherId: teacherId.trim() } : {}),
-=======
->>>>>>> 0ea2bb98d9779d1b7e9a4c3a0fb5df7c48c00e0c
       ...(form.categoryNameAr.trim()
         ? { categoryNameAr: form.categoryNameAr.trim() }
         : form.categoryId ? { categoryId: form.categoryId } : { categoryId: null }),
